@@ -97,8 +97,13 @@ NEW_MENU_SOURCES = [                                # -> Client/ClientModules/Me
 #                           instances - the old per-GUI LocalScripts re-ran on
 #                           reset, this one cannot.
 #   ResetOnSpawn            same, per ScreenGui.
+# Place level properties the architecture depends on. The cube is assigned by
+# Characters.lua, so Roblox must never spawn or respawn a default avatar, and the
+# client is a single LocalScript, so StarterGui must not wipe PlayerGui on spawn.
+# CharacterAutoLoads belongs to the Players service (StarterPlayer has no such
+# property - writing it there is a no-op that Studio warns about).
 PLACE_SETTINGS = [
-    ("StarterPlayer", "bool", "CharacterAutoLoads", "false"),
+    ("Players", "bool", "CharacterAutoLoads", "false"),
     ("StarterGui", "bool", "ResetPlayerGuiOnSpawn", "false"),
     ("StarterGui/Buttons", "bool", "ResetOnSpawn", "false"),
     ("StarterGui/Currency", "bool", "ResetOnSpawn", "false"),

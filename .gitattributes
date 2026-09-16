@@ -1,0 +1,23 @@
+# Roblox place and model files are XML with large base64 payloads. Diffing them
+# produces megabytes of noise, merging them silently corrupts them, and line
+# ending normalisation invalidates the file - so they are treated as binary.
+*.rbxlx binary -diff -merge
+*.rbxlxm binary -diff -merge
+*.rbxmx binary -diff -merge
+*.rbxm binary -diff -merge
+*.rbxmx.lock binary -diff -merge
+*.patch binary -diff
+
+# Text sources: LF everywhere, so a Windows checkout cannot produce a diff that
+# changes every line of a Lua module (which would break the byte-exact round trip
+# between src/ and the built place).
+*.lua text eol=lf
+*.luau text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf

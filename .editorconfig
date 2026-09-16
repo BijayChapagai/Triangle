@@ -1,0 +1,26 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Roblox Studio writes Lua with tabs; matching that keeps the sources and the
+# place's embedded copies byte identical.
+[*.lua]
+indent_style = tab
+indent_size = 4
+max_line_length = 110
+
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+[*.{json,yml,yaml,toml}]
+indent_style = space
+indent_size = 2
+
+[Makefile]
+indent_style = tab

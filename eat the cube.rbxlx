@@ -13972,8 +13972,7 @@ return UpdateLog
 			<int64 name="SourceAssetId">-1</int64>
 			<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
 			<UniqueId name="UniqueId">2ab1a0cc145c0821074ce25000000329</UniqueId>
-		
-				<bool name="CharacterAutoLoads">false</bool></Properties>
+		</Properties>
 		<Item class="StarterPlayerScripts" referent="RBXBBD8CB47809A40AB81753847C7B7085F">
 			<Properties>
 				<BinaryString name="AttributesSerialize"></BinaryString>

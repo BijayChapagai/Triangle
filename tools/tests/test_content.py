@@ -1,0 +1,248 @@
+"""Invariants on src/gamedata.json - the content contract.
+
+These are the rules that are easy to break by editing a number and hard to notice
+in game: a rarity weight that no longer sums to 100, a gift id that no longer
+matches its RewardN button, a zone dais that hangs outside the arena wall, or a
+DataStore rename that orphans every profile.
+"""
+import json
+import math
+
+import pytest
+
+from conftest import GAMEDATA
+
+# The kinds the server actually handles. Adding one here without a handler in
+# Shop.lua / Progression.lua / Gifts.lua is a bug, and vice versa.
+PRODUCT_KINDS = {"size", "killall", "revive", "revenge"}      # Shop.lua KINDS
+PASS_KINDS = {"speed", "cash", "vip"}                          # Players.lua / Shop.lua
+QUEST_TYPES = {"eat", "kill", "rebirth", "size"}               # Progression.lua
+SKIN_UNLOCKS = {"start", "cash", "size", "rebirth"}            # Progression.lua
+GIFT_TYPES = {"Cash", "Size"}                                  # Gifts.lua
+
+
+@pytest.fixture(scope="session")
+def gd():
+    with open(GAMEDATA, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def color_ok(c):
+    return (isinstance(c, list) and len(c) == 3
+            and all(isinstance(v, int) and 0 <= v <= 255 for v in c))
+
+
+# --- identity ---------------------------------------------------------------
+
+def test_game_name_is_the_rebrand(gd):
+    assert gd["settings"]["GameName"] == "Eat The Cube"
+
+
+def test_datastore_name_never_changes(gd):
+    """Renaming this orphans every saved profile. If it must change, migrate."""
+    assert gd["settings"]["DataStoreName"] == "Yeah"
+
+
+def test_group_id(gd):
+    assert gd["settings"]["GroupId"] == 34195654
+
+
+def test_admins(gd):
+    ids = [a["userId"] for a in gd["admins"]]
+    assert len(ids) == len(set(ids)), "duplicate admin userId"
+    assert all(isinstance(i, int) and i > 0 for i in ids)
+    assert 7362557250 in ids, "the owner must keep console access"
+    assert all(a.get("role") for a in gd["admins"])
+
+
+# --- settings ---------------------------------------------------------------
+
+def test_settings_are_scalars(gd):
+    for k, v in gd["settings"].items():
+        assert isinstance(v, (int, float, str, bool)), "%s is a %s" % (k, type(v).__name__)
+        assert k[:1].isupper(), "%s should be CamelCase" % k
+
+
+def test_settings_are_sane(gd):
+    s = gd["settings"]
+    assert 0 < s["KillSizeTransfer"] <= 1
+    assert s["KillSizeCap"] > 0
+    assert s["MaxCubeSize"] > 0
+    assert s["RespawnCooldown"] >= 0
+    assert s["RebirthBase"] > 0 and s["RebirthExponent"] > 1
+    assert s["RebirthMultStep"] > 0
+    assert s["SpawnInterval"] > 0 and s["SpawnBatch"] > 0
+    assert s["LeaderboardThrottle"] > 0 and s["LeaderboardSize"] > 0
+    assert s["ZoneFloorY"] > s["FloorY"], "daises must sit above the floor or they z-fight"
+    assert s["SpawnRegionMinX"] < s["SpawnRegionMaxX"]
+    assert s["SpawnRegionMinZ"] < s["SpawnRegionMaxZ"]
+    assert s["VipRegionMinX"] < s["VipRegionMaxX"]
+    assert s["WallInnerX"] > s["SpawnRegionMaxX"], "food can spawn inside a wall"
+    assert s["VipZoneId"] not in [z["id"] for z in gd["zones"]], (
+        "the VIP wing is not a dais zone; VipZoneId must not collide with one")
+
+
+# --- progression ------------------------------------------------------------
+
+def test_rarity_weights_sum_to_100(gd):
+    total = sum(r["weight"] for r in gd["rarities"])
+    assert math.isclose(total, 100.0, abs_tol=1e-6), "weights sum to %s" % total
+
+
+def test_rarities_escalate(gd):
+    names = [r["name"] for r in gd["rarities"]]
+    assert len(names) == len(set(names))
+    # Ordered common -> rare: weight falls while value and size climb.
+    by_weight = sorted(gd["rarities"], key=lambda r: -r["weight"])
+    values = [r["value"] for r in by_weight]
+    sizes = [r["size"] for r in by_weight]
+    assert values == sorted(values), "rarer cubes must be worth more: %s" % values
+    assert sizes == sorted(sizes), "rarer cubes must be bigger: %s" % sizes
+    assert all(color_ok(r["color"]) for r in gd["rarities"])
+
+
+def test_ranks_increase(gd):
+    names = [r["name"] for r in gd["ranks"]]
+    assert len(names) == len(set(names))
+    thresholds = [r["threshold"] for r in gd["ranks"]]
+    assert thresholds == sorted(thresholds), "ranks must be listed in ascending order"
+    assert thresholds[0] == 0
+
+
+def test_skins(gd):
+    ids = [s["id"] for s in gd["skins"]]
+    assert len(ids) == len(set(ids))
+    assert all(s["unlock"] in SKIN_UNLOCKS for s in gd["skins"])
+    assert sum(1 for s in gd["skins"] if s["unlock"] == "start") == 1, (
+        "exactly one skin is owned from the start")
+    assert all(color_ok(s["color"]) for s in gd["skins"])
+    assert all(s.get("req", 0) >= 0 for s in gd["skins"])
+
+
+def test_quests(gd):
+    ids = [q["id"] for q in gd["quests"]]
+    assert len(ids) == len(set(ids))
+    skins = {s["id"] for s in gd["skins"]}
+    for q in gd["quests"]:
+        assert q["type"] in QUEST_TYPES, "%s has unknown type %s" % (q["id"], q["type"])
+        assert q["goal"] > 0
+        assert q.get("rewardCash", 0) >= 0
+        assert q.get("rewardSkin", "") in skins | {""}
+        assert q["text"]
+
+
+# --- zones ------------------------------------------------------------------
+
+def test_zone_ids_and_rarities(gd):
+    ids = [z["id"] for z in gd["zones"]]
+    assert len(ids) == len(set(ids)) and all(i > 0 for i in ids)
+    names = [z["name"] for z in gd["zones"]]
+    assert len(names) == len(set(names))
+    rarities = {r["name"] for r in gd["rarities"]}
+    assert all(z["rarity"] in rarities for z in gd["zones"])
+    assert all(color_ok(z["color"]) for z in gd["zones"])
+
+
+def test_zone_daises_fit_inside_the_walls(gd):
+    inner_x = gd["settings"]["WallInnerX"]
+    inner_z = gd["settings"]["WallInnerZ"]
+    for z in gd["zones"]:
+        cx, cz = z["center"]
+        assert abs(cx) + z["radius"] <= inner_x, "%s hangs outside the east/west wall" % z["name"]
+        assert abs(cz) + z["radius"] <= inner_z, "%s hangs outside the north/south wall" % z["name"]
+        assert z["radius"] > 0
+
+
+def test_zone_daises_do_not_overlap(gd):
+    """Overlapping daises would share food and make the requirements ambiguous."""
+    zones = gd["zones"]
+    for i, a in enumerate(zones):
+        for b in zones[i + 1:]:
+            d = math.hypot(a["center"][0] - b["center"][0], a["center"][1] - b["center"][1])
+            assert d >= a["radius"] + b["radius"], "%s and %s overlap" % (a["name"], b["name"])
+
+
+def test_zone_requirements_escalate_with_rarity(gd):
+    """Early zones are size gated, late zones are rebirth gated; rebirth wins.
+
+    So the rule is: a rarer zone never needs fewer rebirths, and two zones on the
+    same rebirth tier must still have a rising size gate.
+    """
+    rank = {r["name"]: i for i, r in enumerate(sorted(gd["rarities"], key=lambda r: -r["weight"]))}
+    ordered = sorted(gd["zones"], key=lambda z: rank[z["rarity"]])
+
+    rebirths = [z.get("reqRebirth", 0) for z in ordered]
+    assert rebirths == sorted(rebirths), "rarer zones must not need fewer rebirths"
+
+    for i, a in enumerate(ordered):
+        for b in ordered[i + 1:]:
+            if a.get("reqRebirth", 0) == b.get("reqRebirth", 0):
+                assert a.get("reqSize", 0) <= b.get("reqSize", 0), (
+                    "%s is rarer than %s but easier to enter" % (b["name"], a["name"]))
+
+
+# --- economy ----------------------------------------------------------------
+
+def test_gifts_match_their_buttons(gd):
+    """Frames/Rewards/Rewards holds RewardN for gift N: ids must be 1..N."""
+    ids = sorted(g["id"] for g in gd["gifts"])
+    assert ids == list(range(1, len(ids) + 1)), "gift ids must be contiguous from 1"
+    times = [g["requiredTime"] for g in sorted(gd["gifts"], key=lambda g: g["id"])]
+    assert times == sorted(times), "the ladder must not get easier"
+    assert all(g["type"] in GIFT_TYPES and g["reward"] > 0 for g in gd["gifts"])
+
+
+def test_codes(gd):
+    codes = [c["code"] for c in gd["codes"]]
+    assert len(codes) == len(set(codes))
+    assert all(c["cash"] > 0 for c in gd["codes"])
+    assert all(code == code.upper() and code.replace("_", "").isalnum() for code in codes)
+
+
+def test_products(gd):
+    ids = [p["id"] for p in gd["products"]]
+    product_ids = [p["productId"] for p in gd["products"]]
+    assert len(ids) == len(set(ids))
+    assert len(product_ids) == len(set(product_ids)), "two entries share a ProductId"
+    for p in gd["products"]:
+        assert p["kind"] in PRODUCT_KINDS, "%s has unknown kind %s" % (p["id"], p["kind"])
+        assert isinstance(p["productId"], int) and p["productId"] > 0
+        assert p.get("amount", 0) >= 0
+        assert p["label"]
+
+
+def test_gamepasses(gd):
+    ids = [p["id"] for p in gd["gamepasses"]]
+    pass_ids = [p["gamePassId"] for p in gd["gamepasses"]]
+    assert len(ids) == len(set(ids))
+    assert len(pass_ids) == len(set(pass_ids))
+    assert all(p["kind"] in PASS_KINDS for p in gd["gamepasses"])
+
+
+# --- ui ---------------------------------------------------------------------
+
+def test_menus_fit_the_button_grid(gd):
+    grid = gd["ui"]["menuGridX"], gd["ui"]["menuGridY"]
+    assert len(gd["menus"]) <= len(grid[0]) * len(grid[1]), (
+        "more menus than grid slots: extend ui.menuGridX/menuGridY")
+    names = [m["name"] for m in gd["menus"]]
+    assert len(names) == len(set(names))
+    assert all(color_ok(m["color"]) and m["label"] for m in gd["menus"])
+
+
+def test_ui_numbers_are_in_range(gd):
+    ui = gd["ui"]
+    for key in ("menuGridX", "menuGridY", "buttonSize"):
+        assert all(0 <= v <= 1 for v in ui[key]), "%s must be in scale units" % key
+    assert ui["rowHeight"] > 0
+
+
+def test_events_are_unique_identifiers(gd):
+    events = gd["events"]
+    assert len(events) == len(set(events))
+    assert all(e[:1].isupper() and e.replace("_", "").isalnum() for e in events)
+
+
+def test_update_log_is_non_empty_text(gd):
+    assert gd["updateLog"]
+    assert all(isinstance(t, str) and t.strip() for t in gd["updateLog"])

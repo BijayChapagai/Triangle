@@ -150,8 +150,35 @@ tools/rbxlx.py         .rbxlx parsing/editing/validation toolkit
 tools/content.py       gamedata.json -> GameData/Events/Buttons/Frames/Zones XML
 tools/build.py         the build plan (keep, move, convert, delete, inject)
 tools/verify.py        post-build checks
+tools/diff_place.py    reads the place back and diffs it against gamedata.json
 tools/tree.py          instance tree dump
+tools/tests/           pytest suite for the tools themselves
+.github/workflows/     CI: build, hash-compare, verify, tests, content diff
 ```
+
+## Checks
+
+| Check | Where | What it catches |
+| --- | --- | --- |
+| `python3 tools/build.py` | local + CI | refuses to write a place with dangling refs, an undefined SharedString md5, or the wrong script count |
+| `python3 tools/verify.py` | local + CI | a committed place that no longer matches `src/`, unparseable Lua, a remote/setting/product/menu the code uses but the asset lacks, place settings drifting back to Roblox defaults |
+| `python3 tools/diff_place.py` | local (advisory) | content drift between `src/gamedata.json` and the asset, in either direction. `--strict` (CI) fails on any difference |
+| `python3 -m pytest tools/tests -q` | local + CI | the tools themselves: build determinism, and mutation tests proving verify fails when the place is broken |
+
+```
+python3 tools/diff_place.py            # what does the place say right now?
+python3 tools/diff_place.py --json place.json
+```
+
+Read the report as a direction: "missing from the place" means `gamedata.json` is
+ahead, so rebuild; "not in `gamedata.json`" means the place is ahead, so copy the
+Studio edit back into `src/gamedata.json` before the next regeneration.
+
+`*.rbxlx` files are marked binary in `.gitattributes` (no diff, no merge, no line
+ending normalisation - a rewritten line ending invalidates the file). They are not
+in Git LFS: `git lfs` is not available in every environment that builds this repo,
+and a `.gitattributes` LFS filter that cannot run breaks clones. If history size
+becomes a problem, migrate with `git lfs migrate import --include='*.rbxlx'`.
 
 `tools/verify.py` is the safety net: it re-extracts every script from the built
 place and compares it byte for byte with `src/`, parses each module as Lua, and

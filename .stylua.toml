@@ -1,0 +1,11 @@
+# StyLua config. The tree is not yet formatted with it (CI runs the check as
+# informational); run `stylua .` once locally, review the diff, and flip the CI
+# job to blocking. Settings match what the modules already look like, so the
+# reformat should be close to a no-op.
+column_width = 110
+line_endings = "Unix"
+indent_type = "Tabs"
+indent_width = 4
+quote_style = "AutoPreferDouble"
+call_parentheses = "Always"
+collapse_simple_statement = "Never"

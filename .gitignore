@@ -1,2 +1,16 @@
 tools/__pycache__/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Roblox Studio lock files, written next to a place while it is open.
+*.rbxlx.lock
+*.rbxlxm.lock
+
+.DS_Store
+Thumbs.db
+
+# One-off patch/export artifacts. A 5 MB patch used to be tracked at the repo
+# root; it is out of the index now, and this keeps new ones from being added.
+*.patch
+*.diff
