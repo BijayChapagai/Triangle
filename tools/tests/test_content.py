@@ -330,6 +330,47 @@ def test_panels_are_big_enough_for_their_rows(gd):
         "a tab panel cannot show all %d of its rows without scrolling" % widest)
 
 
+def test_rarity_personalities_escalate(gd):
+    """Each tier has its own material and its own motion, and a rarer cube is
+    never calmer or duller than the one below it - that ladder is the whole point
+    of giving food a personality."""
+    import content
+
+    rarities = gd["rarities"]
+    materials = [r["personality"]["material"] for r in rarities]
+    assert len(set(materials)) == len(materials), "two tiers share a material: %s" % materials
+    for material in materials:
+        assert material in content.MATERIALS, (
+            "%s is not a known Enum.Material name - content.py cannot write its value"
+            % material)
+
+    for key in ("spin", "tilt", "bob", "pulse"):
+        values = [r["personality"][key] for r in rarities]
+        assert values == sorted(values), "%s does not escalate with rarity: %s" % (key, values)
+        assert values[0] >= 0 and values[-1] > 0, "%s: nothing moves" % key
+
+    reflects = [r["personality"]["reflectance"] for r in rarities]
+    assert reflects == sorted(reflects), "a rarer tier is less shiny: %s" % reflects
+    for r in rarities:
+        per = r["personality"]
+        assert 0 <= per["reflectance"] <= 1 and 0 <= per["transparency"] < 0.5, (
+            "%s would read as invisible or as a mirror" % r["name"])
+
+    # Lights only at the top: they are the expensive half of a personality, and
+    # Legendary + Mythic are 4% of spawns between them.
+    glows = [i for i, r in enumerate(rarities) if r["personality"].get("glow")]
+    assert glows == list(range(glows[0], len(rarities))), (
+        "glow must be a top-of-the-ladder thing, got tiers %s" % glows)
+    assert glows[0] >= len(rarities) - 2, "too many tiers carry a light"
+
+
+def test_food_glow_budget_is_below_a_full_arena(gd):
+    """A zone arena holds ZoneFoodTarget cubes of ONE rarity, so the budget is
+    what stops a Mythic arena from becoming 150 light sources."""
+    s = gd["settings"]
+    assert 0 < s["FoodFxBudget"] <= s["ZoneFoodTarget"], s["FoodFxBudget"]
+
+
 def test_events_are_unique_identifiers(gd):
     events = gd["events"]
     assert len(events) == len(set(events))

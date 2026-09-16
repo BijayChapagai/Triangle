@@ -80,7 +80,7 @@ NEW_SERVER_SOURCES = [
 NEW_SHARED_SOURCES = ["GameConfig"]                 # -> ReplicatedStorage/Modules
 NEW_CLIENT_SOURCES = [                              # -> Client/ClientModules
     "LoadingScreen", "Notifier", "Hud", "DeathScreen", "Camera", "Chat", "CoreGui",
-    "KillFeed", "ZoneGuard",
+    "KillFeed", "ZoneGuard", "FoodFx",
 ]
 NEW_MENU_SOURCES = [                                # -> Client/ClientModules/Menus
     "MenuUi", "Tabs", "Rebirth", "Skins", "Quests", "Zones", "Leaderboard",
@@ -304,6 +304,9 @@ def main():
         chunks["StarterGui"] = extra_guis
     if "Zones" not in set(items[c]["name"] for c in items[ref_of("Workspace")]["children"]):
         chunks["Workspace"] = content.zones(b, gd)
+    # Food is an asset too: one dressed cube per rarity, which Food.lua clones.
+    if "Food" not in child_names("ServerStorage"):
+        chunks["ServerStorage"] = content.food_templates(b, gd)
     chunks[CLIENT_BOOTSTRAP] = content.notifier(b, gd)
 
     # ---- 6. new modules ----------------------------------------------------

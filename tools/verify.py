@@ -868,6 +868,122 @@ def main():
                     problems.append("tab row %s/%s opens %r but there is no StarterGui/Frames/%s"
                                     % (tab["name"], entry["label"], target, target))
 
+    # ---- 4f. every rarity ships a dressed cube ------------------------------
+    # Food is an asset: Food.lua clones ServerStorage/Food/<Rarity> instead of
+    # building a part, so a missing or repainted template silently costs that tier
+    # its personality. The tier order also has to mean something - a Mythic cube
+    # that spins slower than a Common one is a balance bug nobody reports, players
+    # just stop caring about the top tier.
+    settings = gd.get("settings") or {}
+    budget = settings.get("FoodFxBudget")
+    zone_target = settings.get("ZoneFoodTarget")
+    if budget is None or not 0 < float(budget) <= float(zone_target or 1):
+        problems.append("settings.FoodFxBudget is %r; it must be between 1 and ZoneFoodTarget "
+                        "(%r) or a full rarity arena either has no glows or too many"
+                        % (budget, zone_target))
+
+    def vec3_of(inner):
+        vals = re.findall(r"<[XYZ]>([-\d.e]+)</[XYZ]>", inner or "")
+        return tuple(float(v) for v in vals) if len(vals) == 3 else None
+
+    food_root = by_path.get("ServerStorage/Food", [None])[0]
+    if food_root is None:
+        problems.append("ServerStorage/Food is missing - every tier falls back to a plain cube")
+    else:
+        motion_seen = []
+        glow_from = None
+        for index, rarity in enumerate(gd["rarities"]):
+            name = rarity["name"]
+            per = rarity.get("personality") or {}
+            tpath = "ServerStorage/Food/%s" % name
+            ref = by_path.get(tpath, [None])[0]
+            if ref is None:
+                problems.append("%s is missing - the %s tier has no cube to clone" % (tpath, name))
+                continue
+            if items[ref]["class"] != "Part":
+                problems.append("%s is a %s; food cubes are plain block Parts"
+                                % (tpath, items[ref]["class"]))
+
+            # Behaviour every cube needs, whatever it looks like: food must not
+            # shove a player, must be edible, and must not cost shadow or raycast
+            # time (there are 420 of these in the hub alone).
+            for prop, want in (("Anchored", "true"), ("CanCollide", "false"),
+                               ("CanTouch", "true"), ("CanQuery", "false"),
+                               ("CastShadow", "false")):
+                got = (prop_of(tpath, prop) or "").strip()
+                if got != want:
+                    problems.append("%s has %s=%s; food cubes need %s=%s"
+                                    % (tpath, prop, got or "?", prop, want))
+
+            want_material = content.MATERIALS.get(per.get("material", "Neon"))
+            got_material = (prop_of(tpath, "Material") or "").strip()
+            if want_material is not None and got_material != str(want_material):
+                problems.append("%s material is %s but gamedata says %s (%s)"
+                                % (tpath, got_material or "?", want_material, per.get("material")))
+
+            rgb = rarity["color"]
+            packed = (int(rgb[0]) << 16) | (int(rgb[1]) << 8) | int(rgb[2])
+            got_color = (prop_of(tpath, "Color3uint8") or "").strip()
+            if got_color != str(packed):
+                problems.append("%s colour is %s but the %s rarity is rgb%s (%d)"
+                                % (tpath, got_color or "?", name, tuple(rgb), packed))
+
+            size = vec3_of(prop_of(tpath, "size"))
+            if size != (float(rarity["size"]),) * 3:
+                problems.append("%s size is %s but the %s rarity is %s studs"
+                                % (tpath, size, name, rarity["size"]))
+
+            for key in ("reflectance", "transparency"):
+                prop = key.capitalize()
+                want = float(per.get(key, 0))
+                got = prop_of(tpath, prop)
+                if got is None or abs(float(got) - want) > 1e-6:
+                    problems.append("%s %s is %s but gamedata says %s"
+                                    % (tpath, prop, (got or "?").strip(), want))
+
+            motion = {}
+            for key in ("Spin", "Tilt", "Bob", "Pulse"):
+                vpath = "%s/%s" % (tpath, key)
+                vref = by_path.get(vpath, [None])[0]
+                if vref is None:
+                    problems.append("%s is missing - FoodFx cannot animate that tier" % vpath)
+                    motion[key.lower()] = 0.0
+                else:
+                    motion[key.lower()] = float((prop_of(vpath, "Value") or "0").strip() or 0)
+            motion_seen.append((name, index, motion))
+
+            glow_path = "%s/Glow" % tpath
+            wants_glow = bool(per.get("glow"))
+            if wants_glow != (glow_path in by_path):
+                problems.append("%s %s a Glow light but gamedata %s"
+                                % (tpath, "has" if glow_path in by_path else "has no",
+                                   "asks for one" if wants_glow else "does not"))
+            if wants_glow:
+                if glow_from is None:
+                    glow_from = index
+                elif index < glow_from:
+                    pass
+                for key, prop in (("brightness", "Brightness"), ("range", "Range")):
+                    want = float(per["glow"].get(key, 0))
+                    got = prop_of(glow_path, prop)
+                    if got is None or abs(float(got) - want) > 1e-6:
+                        problems.append("%s %s is %s but gamedata says %s"
+                                        % (glow_path, prop, (got or "?").strip(), want))
+            elif glow_from is not None:
+                problems.append("%s has no Glow but %s (a lower tier) does - the top of the "
+                                " ladder must not be duller than the rung below it"
+                                % (tpath, gd["rarities"][glow_from]["name"]))
+
+        # Motion must escalate with the tier: the ladder is the personality.
+        for i in range(1, len(motion_seen)):
+            lower, higher = motion_seen[i - 1][2], motion_seen[i][2]
+            for key in ("spin", "tilt", "bob", "pulse"):
+                if higher[key] < lower[key]:
+                    problems.append("%s %s (%s) is calmer than %s (%s); rarer food should "
+                                    "move at least as much"
+                                    % (motion_seen[i][0], key, higher[key],
+                                       motion_seen[i - 1][0], lower[key]))
+
     admins = child_names(items, by_path["ReplicatedStorage/GameData/Admins"][0])
     if not admins:
         problems.append("GameData/Admins is empty - nobody can use the console")

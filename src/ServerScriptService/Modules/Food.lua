@@ -13,6 +13,7 @@
 -- Pickup is handled here too, with the same zone gate the teleport uses.
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 
@@ -38,6 +39,54 @@ end
 local liveCounts = {}
 local hooked = {}
 local lastZoneWarn = {}
+
+--// ----------------------------------------------------------------- templates
+-- ServerStorage/Food/<Rarity> IS the cube: material, colour, finish, size and the
+-- optional Glow light are properties of that part, and the Spin/Tilt/Bob/Pulse
+-- values inside it drive the client animator. Food clones it rather than building
+-- a part, so repainting a tier in Studio repaints every cube of that tier.
+local FoodTemplates = ServerStorage:FindFirstChild("Food")
+local warnedTemplate = {}
+
+-- Legendary and Mythic cubes ship a PointLight. A zone arena holds 150 of one
+-- rarity, and 150 light sources is a frame-time disaster, so a region keeps this
+-- many glows and the rest of the tier loses only the light - the material, spin,
+-- bob and pulse are free and still say which tier it is.
+local FX_BUDGET = math.max(0, tonumber(C.FoodFxBudget) or 0)
+local fxUsed = {}
+
+local function numberOf(part, name)
+	local value = part:FindFirstChild(name)
+	if value and (value:IsA("NumberValue") or value:IsA("IntValue")) then
+		return tonumber(value.Value) or 0
+	end
+	return 0
+end
+
+local function makeCube(rarity)
+	local template = FoodTemplates and FoodTemplates:FindFirstChild(rarity.name)
+	if template and template:IsA("BasePart") then
+		return template:Clone()
+	end
+
+	-- No template: that tier loses its personality, not the game its food.
+	if not warnedTemplate[rarity.name] then
+		warnedTemplate[rarity.name] = true
+		warn(("[Food] ServerStorage/Food/%s is missing - that tier falls back to a plain cube")
+			:format(rarity.name))
+	end
+	local part = Instance.new("Part")
+	part.Shape = Enum.PartType.Block
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = true
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Color = rarity.color
+	part.Size = Vector3.new(rarity.size, rarity.size, rarity.size)
+	return part
+end
 
 local function bump(zoneId, delta)
 	liveCounts[zoneId] = math.max(0, (liveCounts[zoneId] or 0) + delta)
@@ -109,27 +158,31 @@ local function spawnOne(entry)
 	local rarity = GameConfig.RARITIES[rarityKey] or GameConfig.RARITY_LIST[1]
 	if not rarity then return nil end
 
-	local part = Instance.new("Part")
-	part.Shape = Enum.PartType.Block
+	local part = makeCube(rarity)
 	part.Name = "Food"
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanTouch = true
-	-- Hundreds of shadow-casting neon parts under Lighting.Technology = Future is
-	-- a frame-time disaster; food never needs to cast a shadow or be raycast.
-	part.CastShadow = false
-	part.CanQuery = false
-	part.Transparency = 0
-	part.Material = Enum.Material.Neon
-	part.Color = rarity.color
-	part.Size = Vector3.new(0.05, 0.05, 0.05) -- eased out to full size below
 	part:SetAttribute("Rarity", rarity.name)
 	part:SetAttribute("Value", rarity.value)
 	part:SetAttribute("Zone", entry.zoneId)
 
+	-- Keep the light only while the region's budget lasts.
+	local glow = part:FindFirstChild("Glow")
+	if glow then
+		fxUsed[entry.zoneId] = (fxUsed[entry.zoneId] or 0) + 1
+		if fxUsed[entry.zoneId] > FX_BUDGET then
+			glow:Destroy()
+			glow = nil
+		end
+	end
+
 	local x, z = pickPosition(entry)
-	-- Rest ON the surface instead of sinking into it.
-	part.CFrame = CFrame.new(x, (entry.floorY or GameConfig.MAP.FloorY) + rarity.size / 2, z)
+	-- Rest ON the surface instead of sinking into it, and clear of it by however
+	-- far this tier hovers, so the bob never clips the floor.
+	local bob = numberOf(part, "Bob")
+	local baseY = (entry.floorY or GameConfig.MAP.FloorY) + rarity.size / 2 + bob
+	part.CFrame = CFrame.new(x, baseY, z)
+	-- The client animator hovers and breathes around this height; it is an
+	-- attribute rather than a value object so it costs one replication each.
+	part:SetAttribute("BaseY", baseY)
 
 	bump(entry.zoneId, 1)
 
@@ -137,12 +190,14 @@ local function spawnOne(entry)
 	CollectionService:AddTag(part, "Food")
 	part.Parent = FoodFolder
 
-	TweenService:Create(part, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Size = Vector3.new(rarity.size, rarity.size, rarity.size),
-	}):Play()
+	-- The pop-in, spin, hover and breathing are the client's job (FoodFx): one
+	-- owner of Size and CFrame per cube, and only for cubes a player can see.
 
 	part.Destroying:Connect(function()
 		bump(entry.zoneId, -1)
+		if glow then
+			fxUsed[entry.zoneId] = math.max(0, (fxUsed[entry.zoneId] or 1) - 1)
+		end
 	end)
 
 	return part
@@ -246,6 +301,7 @@ function Food.Clear()
 		part:Destroy()
 	end
 	table.clear(liveCounts)
+	table.clear(fxUsed)
 end
 
 function Food.Count()

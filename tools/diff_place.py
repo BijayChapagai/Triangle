@@ -28,6 +28,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import content  # noqa: E402
 import rbxlx  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -170,6 +171,35 @@ def actual(place, gd):
         zones[name] = entry
     out["zones"] = zones
 
+    # Food templates: the cube each rarity clones, read back the way content.py
+    # writes it (material token, packed colour, size, motion values, glow).
+    food = {}
+    for name, cls, ref in place.children("ServerStorage/Food"):
+        base = "ServerStorage/Food/" + name
+        entry = place.value(base) or {}
+        blk = place.block(ref)
+        material = re.search(r'<token name="Material">(\d+)</token>', blk)
+        entry["Material"] = (content.MATERIAL_NAMES.get(int(material.group(1)))
+                             if material else None)
+        packed = re.search(r'<Color3uint8 name="Color3uint8">(\d+)</Color3uint8>', blk)
+        if packed:
+            v = int(packed.group(1))
+            entry["Color"] = [(v >> 16) & 255, (v >> 8) & 255, v & 255]
+        _pos, size = place.geometry(base)
+        entry["Size"] = [round(v, 3) for v in size] if size else None
+        for prop, key in (("Reflectance", "Reflectance"), ("Transparency", "Transparency")):
+            got = re.search(r'<float name="%s">([-\d.e]+)</float>' % prop, blk)
+            entry[key] = float(got.group(1)) if got else None
+        glow = place.find(base + "/Glow")
+        if glow:
+            gblk = place.block(glow)
+            bright = re.search(r'<float name="Brightness">([-\d.e]+)</float>', gblk)
+            reach = re.search(r'<float name="Range">([-\d.e]+)</float>', gblk)
+            entry["Glow"] = {"brightness": float(bright.group(1)) if bright else None,
+                             "range": float(reach.group(1)) if reach else None}
+        food[name] = entry
+    out["food"] = food
+
     buttons = set(place.names("StarterGui/Buttons"))
     frames = set(name for name, cls, _ref in place.children("StarterGui/Frames") if cls == "Frame")
     tab_items = (gd.get("tabs") or {}).get("items") or []
@@ -229,6 +259,26 @@ def expected(gd):
                                      "Radius": float(z["radius"]),
                                      "Top": floor_y})
                         for z in gd["zones"])
+
+    food = {}
+    for r in gd["rarities"]:
+        per = r.get("personality") or {}
+        entry = {
+            "Spin": float(per.get("spin", 0)),
+            "Tilt": float(per.get("tilt", 0)),
+            "Bob": float(per.get("bob", 0)),
+            "Pulse": float(per.get("pulse", 0)),
+            "Material": per.get("material", "Neon"),
+            "Color": list(r["color"]),
+            "Size": [float(r["size"])] * 3,
+            "Reflectance": float(per.get("reflectance", 0)),
+            "Transparency": float(per.get("transparency", 0)),
+        }
+        if per.get("glow"):
+            entry["Glow"] = {"brightness": float(per["glow"].get("brightness", 1)),
+                             "range": float(per["glow"].get("range", 12))}
+        food[r["name"]] = entry
+    out["food"] = food
 
     out["menuFrames"] = dict((m["name"], {"Frame": True}) for m in gd["menus"])
     tab_items = (gd.get("tabs") or {}).get("items") or []

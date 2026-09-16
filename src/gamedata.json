@@ -24,6 +24,7 @@
     "CashPerCubePerRebirth": 1,
     "DataStoreName": "Yeah",
     "FloorY": 0,
+    "FoodFxBudget": 24,
     "GameName": "Eat The Cube",
     "GroupId": 34195654,
     "HeartbeatInterval": 2,
@@ -136,7 +137,16 @@
         255,
         70,
         130
-      ]
+      ],
+      "personality": {
+        "material": "Plastic",
+        "reflectance": 0.0,
+        "transparency": 0.0,
+        "spin": 45,
+        "tilt": 0,
+        "bob": 0.0,
+        "pulse": 0.0
+      }
     },
     {
       "name": "Rare",
@@ -147,7 +157,16 @@
         60,
         170,
         255
-      ]
+      ],
+      "personality": {
+        "material": "Neon",
+        "reflectance": 0.1,
+        "transparency": 0.0,
+        "spin": 80,
+        "tilt": 15,
+        "bob": 0.5,
+        "pulse": 0.0
+      }
     },
     {
       "name": "Epic",
@@ -158,7 +177,16 @@
         180,
         90,
         255
-      ]
+      ],
+      "personality": {
+        "material": "Foil",
+        "reflectance": 0.35,
+        "transparency": 0.0,
+        "spin": 125,
+        "tilt": 30,
+        "bob": 0.9,
+        "pulse": 0.05
+      }
     },
     {
       "name": "Legendary",
@@ -169,7 +197,20 @@
         255,
         205,
         50
-      ]
+      ],
+      "personality": {
+        "material": "Metal",
+        "reflectance": 0.65,
+        "transparency": 0.0,
+        "spin": 170,
+        "tilt": 45,
+        "bob": 1.3,
+        "pulse": 0.08,
+        "glow": {
+          "brightness": 1.4,
+          "range": 16
+        }
+      }
     },
     {
       "name": "Mythic",
@@ -180,7 +221,20 @@
         255,
         95,
         35
-      ]
+      ],
+      "personality": {
+        "material": "Glass",
+        "reflectance": 0.85,
+        "transparency": 0.18,
+        "spin": 230,
+        "tilt": 65,
+        "bob": 1.8,
+        "pulse": 0.12,
+        "glow": {
+          "brightness": 2.2,
+          "range": 24
+        }
+      }
     }
   ],
   "skins": [

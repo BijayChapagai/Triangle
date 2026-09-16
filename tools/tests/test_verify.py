@@ -225,6 +225,54 @@ def test_tab_row_pointing_at_a_missing_menu_is_caught(raw, tmp_path):
     assert "Rebrth" in out
 
 
+# Food is an asset now: each rarity is a dressed cube in ServerStorage/Food that
+# Food.lua clones. A repainted tier or a missing template is invisible in every
+# other check - the game runs, the cubes just stop meaning anything.
+def test_duller_top_tier_is_caught(raw, tmp_path):
+    import re
+
+    def fn(block):
+        # Mythic spins at 230 deg/s; Common spins at 45, so 10 puts the top of the
+        # ladder below the bottom of it.
+        return re.sub(r'(<double name="Value">)[^<]*(</double>)', r'\g<1>10\g<2>',
+                      block, count=1)
+
+    code, out = verify(write(tmp_path / "slow_mythic.rbxlx",
+                             replace_span(raw, "ServerStorage/Food/Mythic/Spin", fn)))
+    assert code == 1
+    assert "Mythic" in out and "spin" in out
+
+
+def test_missing_food_template_is_caught(raw, tmp_path):
+    a, b = span(raw, "ServerStorage/Food/Mythic")
+    code, out = verify(write(tmp_path / "no_mythic.rbxlx", raw[:a] + raw[b:]))
+    assert code == 1
+    assert "ServerStorage/Food/Mythic" in out
+
+
+def test_repainted_food_material_is_caught(raw, tmp_path):
+    def fn(block):
+        # Mythic is Glass (1568); Plastic is what Common wears.
+        return block.replace('<token name="Material">1568</token>',
+                             '<token name="Material">256</token>', 1)
+
+    code, out = verify(write(tmp_path / "plastic_mythic.rbxlx",
+                             replace_span(raw, "ServerStorage/Food/Mythic", fn)))
+    assert code == 1
+    assert "material" in out
+
+
+def test_food_cube_that_blocks_players_is_caught(raw, tmp_path):
+    def fn(block):
+        return block.replace('<bool name="CanCollide">false</bool>',
+                             '<bool name="CanCollide">true</bool>', 1)
+
+    code, out = verify(write(tmp_path / "solid_food.rbxlx",
+                             replace_span(raw, "ServerStorage/Food/Rare", fn)))
+    assert code == 1
+    assert "CanCollide" in out
+
+
 # Zone arenas are generated map geometry, which makes them editable in Studio -
 # and a wall dragged off, an arena dropped on the hub, or a model left streamable
 # are all silent breakage: the game still runs, the zones just stop being zones.

@@ -1112,6 +1112,91 @@ def zones(b, gd):
 
 
 # ---------------------------------------------------------------------------
+# food (ServerStorage/Food) - one dressed cube per rarity
+# ---------------------------------------------------------------------------
+
+# Enum.Material, values from robloxapi.github.io/ref/enum/Material.html. Only
+# materials that work on a plain Part are listed: ForceField needs a UV-mapped
+# MeshPart, and Air/Water are terrain-only.
+MATERIALS = {
+    "Plastic": 256, "SmoothPlastic": 272, "Neon": 288, "Wood": 512, "WoodPlanks": 528,
+    "Marble": 784, "Basalt": 788, "Slate": 800, "CrackedLava": 804, "Concrete": 816,
+    "Limestone": 820, "Granite": 832, "Pavement": 836, "Brick": 848, "Pebble": 864,
+    "Cobblestone": 880, "Rock": 896, "Sandstone": 912, "CorrodedMetal": 1040,
+    "DiamondPlate": 1056, "Foil": 1072, "Metal": 1088, "Grass": 1280,
+    "LeafyGrass": 1284, "Sand": 1296, "Fabric": 1312, "Snow": 1328, "Mud": 1344,
+    "Ground": 1360, "Asphalt": 1376, "Salt": 1392, "Ice": 1536, "Glacier": 1552,
+    "Glass": 1568, "Cardboard": 2304,
+}
+MATERIAL_NAMES = dict((v, k) for k, v in MATERIALS.items())   # diff_place reads back
+
+
+def food_part(b, rarity, depth=D + 1):
+    """One rarity's cube - the asset Food.lua clones instead of building a part.
+
+    Everything that makes a tier look like itself is a property of this part or a
+    value inside it: material, colour, finish, size, the optional Glow light, and
+    the Spin/Tilt/Bob/Pulse numbers the client animator reads. Repainting a tier
+    in Studio therefore changes every cube of that tier, with no script involved.
+    """
+    per = rarity.get("personality") or {}
+    material = per.get("material", "Neon")
+    if material not in MATERIALS:
+        raise KeyError("rarity %s asks for material %r; add its Enum.Material value "
+                       "to content.MATERIALS" % (rarity["name"], material))
+    size = float(rarity["size"])
+    rgb = tuple(rarity["color"])
+
+    props = {
+        "shape": 1,            # Enum.PartType.Block: a cube, never a mesh
+        "Anchored": True,
+        "CanCollide": False,   # food must never shove a player off a wall
+        "CanQuery": False,
+        "CanTouch": True,
+        "CastShadow": False,   # hundreds of shadow casters under Future cost frames
+        "Locked": False,
+        "Transparency": float(per.get("transparency", 0)),
+        "Reflectance": float(per.get("reflectance", 0)),
+        "Material": MATERIALS[material],
+        "Color3uint8": ("Color3uint8", rgb),
+        # Lowercase, with its type: a Part's size property is "size" in rbxlx, the
+        # same key map_part uses. "Size" would be written as an extra property and
+        # quietly ignored, leaving every tier the template's default cube.
+        "size": ("Vector3", (size, size, size)),
+        "TopSurface": SMOOTH,
+        "BottomSurface": SMOOTH,
+    }
+
+    # Motion ships as values rather than code, so a tier can be calmed down or
+    # spun up in Studio. Zero means "this tier stands still".
+    motion = (num(b, "Spin", per.get("spin", 0), depth + 1)
+              + num(b, "Tilt", per.get("tilt", 0), depth + 1)
+              + num(b, "Bob", per.get("bob", 0), depth + 1)
+              + num(b, "Pulse", per.get("pulse", 0), depth + 1))
+
+    light = ""
+    glow = per.get("glow")
+    if glow:
+        # Shadows off: the shadow pass is the expensive half of a light, and a
+        # region only keeps FoodFxBudget of these anyway.
+        light = b.bare_item("PointLight", "Glow", [
+            ("float", "Brightness", float(glow.get("brightness", 1))),
+            ("float", "Range", float(glow.get("range", 12))),
+            ("Color3", "Color", tuple(glow.get("color", rgb))),
+            ("bool", "Enabled", True),
+            ("bool", "Shadows", False),
+        ], depth=depth + 1)[0]
+
+    return b.item("Part", rarity["name"], props, children=motion + light, depth=depth)[0]
+
+
+def food_templates(b, gd):
+    """ServerStorage/Food, one template per rarity, in gamedata order."""
+    return folder(b, "Food",
+                  "".join(food_part(b, r, D + 1) for r in gd["rarities"]), D)
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -1129,6 +1214,7 @@ def build(b, gd):
         "StarterGui/Frames": menu_frames(b, gd),
         "StarterGui": killfeed(b, gd) + zonewarn(b, gd),
         "Workspace": zones(b, gd),
+        "ServerStorage": food_templates(b, gd),
     }
 
 
