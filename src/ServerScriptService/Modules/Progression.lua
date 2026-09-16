@@ -83,6 +83,14 @@ function Progression.applySkin(player)
 	if not char or not char.PrimaryPart then return end
 	local skin = GameConfig.getSkin(data and data.Skin) or GameConfig.SKINS[1]
 	char.PrimaryPart.Color = skin.color
+
+	-- The rim follows the skin instead of being a fixed black shell. A black
+	-- outline on a cube this small covers most of the visible faces, which is why
+	-- every cube used to read as a dark blob from a few studs away.
+	local highlight = char:FindFirstChildOfClass("Highlight")
+	if highlight then
+		highlight.OutlineColor = skin.color:Lerp(Color3.new(1, 1, 1), 0.55)
+	end
 end
 
 function Progression.refreshVisuals(player)

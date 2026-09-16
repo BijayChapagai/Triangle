@@ -188,8 +188,8 @@
       "id": "Default",
       "color": [
         255,
-        0,
-        80
+        255,
+        255
       ],
       "unlock": "start",
       "req": 0
