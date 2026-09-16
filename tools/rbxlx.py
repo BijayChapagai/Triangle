@@ -24,6 +24,29 @@ SOURCE_RE = re.compile(r'<ProtectedString name="Source">.*?</ProtectedString>', 
 TAG = re.compile(r'<(/?)([A-Za-z0-9_]+)((?:\s+[A-Za-z0-9_:]+="[^"]*")*)\s*(/?)>')
 ATTR = re.compile(r'([A-Za-z0-9_:]+)="([^"]*)"')
 REF_RE = re.compile(r'<[Rr]ef name="[^"]*">([^<]*)</[Rr]ef>')
+# A SharedString *definition* lives in <SharedStrings> and carries md5="...";
+# a *reference* lives in an instance's properties and carries name="..." with
+# the md5 as its text. Roblox aborts the whole place with "Unknown referenced
+# shared string md5" when a reference has no matching definition - including
+# when the md5 text is simply empty.
+SHARED_DEF_RE = re.compile(r'<SharedString md5="([^"]+)">([^<]*)</SharedString>')
+SHARED_REF_RE = re.compile(r'<SharedString name="[^"]*">([^<]*)</SharedString>')
+
+
+def empty_shared_string(data):
+    """md5 of the zero-length SharedString blob, or "" if the place has none.
+
+    Every instance serialises Tags / Materials / SlimHash properties that point
+    at this blob, so generated instances must point at it too.
+    """
+    import base64
+    for m in SHARED_DEF_RE.finditer(data):
+        try:
+            if not base64.b64decode(m.group(2)):
+                return m.group(1)
+        except Exception:
+            continue
+    return ""
 CDATA_RE = re.compile(r'<!\[CDATA\[.*?\]\]>', re.S)
 CLASS_TAG = re.compile(r'<Item class="([^"]+)"')
 
@@ -245,6 +268,10 @@ class Builder:
         self.existing = set(self.items.keys())
         self._templates = {}
         self._rng = random.Random(seed)
+        self.empty_shared = empty_shared_string(data)
+        if not self.empty_shared:
+            raise RuntimeError("the base place defines no empty SharedString blob; "
+                               "generated instances would reference an undefined md5")
 
     def uid(self):
         while True:
@@ -276,10 +303,10 @@ class Builder:
             '{i}<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>\n'
             '{i}<string name="Name">{name}</string>\n'
             '{i}<int64 name="SourceAssetId">-1</int64>\n'
-            '{i}<SharedString name="Tags"></SharedString>\n'
+            '{i}<SharedString name="Tags">{ss}</SharedString>\n'
             '{i}<UniqueId name="UniqueId">{ref}</UniqueId>\n'
             '{extra}'
-        ).format(i=ind, name=esc(name), ref=ref, extra=extra)
+        ).format(i=ind, name=esc(name), ref=ref, ss=self.empty_shared, extra=extra)
 
     def props_xml(self, cls, overrides, ind, drop=()):
         drop = set(drop) | set(COMMON_DROP)
@@ -466,6 +493,13 @@ def validate(data, expect_scripts=None, expect_localscripts=None):
                    if m.group(1) and m.group(1) != "null") - set(items)
     if dangling:
         problems.append("dangling <ref> referents: %s" % sorted(dangling)[:6])
+
+    defined = set(m.group(1) for m in SHARED_DEF_RE.finditer(data))
+    missing = sorted(set(SHARED_REF_RE.findall(data)) - defined)
+    if missing:
+        problems.append("SharedString md5 referenced but never defined "
+                        "(Roblox: \"Unknown referenced shared string md5\"): %s"
+                        % [m or "<empty>" for m in missing[:4]])
 
     scripts = [r for r in order if items[r]["class"] == "Script"]
     localscripts = [r for r in order if items[r]["class"] == "LocalScript"]

@@ -408,6 +408,17 @@ def main():
     for name in sorted(used_guis - guis):
         problems.append("ScreenGui %r is used but missing from StarterGui" % name)
 
+    # ---- 4a. shared strings -------------------------------------------------
+    # An undefined (or empty) SharedString md5 makes Roblox refuse to open the
+    # place at all, so this one is worth checking independently of the build.
+    defined = set(m.group(1) for m in rbxlx.SHARED_DEF_RE.finditer(raw))
+    missing = sorted(set(rbxlx.SHARED_REF_RE.findall(raw)) - defined)
+    if missing:
+        problems.append("undefined SharedString md5: %s" % [m or "<empty>" for m in missing[:4]])
+    else:
+        print("shared     %d definitions, %d reference sites, all resolve"
+              % (len(defined), len(rbxlx.SHARED_REF_RE.findall(raw))))
+
     # ---- 4b. asset contract ------------------------------------------------
     for path, why in REQUIRED_ASSETS:
         if path not in by_path:
