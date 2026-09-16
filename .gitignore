@@ -14,11 +14,3 @@ Thumbs.db
 # root; it is out of the index now, and this keeps new ones from being added.
 *.patch
 *.diff
-
-# The CI workflow is written and lives in the working tree, but it cannot be
-# pushed by the credential this checkout authenticates with: a GitHub App
-# installation without the `workflows` permission is refused any commit that
-# creates or updates .github/workflows/*, and GitHub rejects the whole push for
-# it. Keep it local until a token with `workflows: write` is available, then
-# `git add -f .github/workflows/ci.yml`.
-.github/workflows/
