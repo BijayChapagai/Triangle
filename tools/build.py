@@ -287,6 +287,17 @@ def main():
     chunks["ReplicatedStorage/Events"] = content.events(b, gd)
     chunks["StarterGui/Buttons"] = content.menu_buttons(b, dict(gd, menus=buttons_only))
     chunks["StarterGui/Frames"] = content.menu_frames(b, dict(gd, menus=frames_only))
+
+    # Stand-alone ScreenGuis, each injected only if the place does not have one
+    # with that name yet.
+    have_guis = child_names("StarterGui")
+    extra_guis = ""
+    if "KillFeed" not in have_guis:
+        extra_guis += content.killfeed(b, gd)
+    if "ZoneWarn" not in have_guis:
+        extra_guis += content.zonewarn(b, gd)
+    if extra_guis:
+        chunks["StarterGui"] = extra_guis
     if "Zones" not in set(items[c]["name"] for c in items[ref_of("Workspace")]["children"]):
         chunks["Workspace"] = content.zones(b, gd)
     chunks[CLIENT_BOOTSTRAP] = content.notifier(b, gd)

@@ -68,6 +68,16 @@ def value_for(b, name, value, depth=D + 1):
 # GameData
 # ---------------------------------------------------------------------------
 
+def prefs(b, gd):
+    """GameData/Prefs: defaults for the client settings menu.
+
+    Values a player changes are saved into their profile; these are what a fresh
+    profile starts from, and they stay editable in Studio like every other content.
+    """
+    return folder(b, "Prefs", "".join(value_for(b, k, v, D + 2)
+                                      for k, v in sorted(gd["prefs"].items())), D + 1)
+
+
 def gamedata(b, gd):
     sections = []
 
@@ -152,6 +162,7 @@ def gamedata(b, gd):
     log = "".join(string(b, str(i), text, D + 2)
                   for i, text in enumerate(gd.get("updateLog", []), start=1))
     sections.append(folder(b, "UpdateLog", log, D + 1))
+    sections.append(prefs(b, gd))
 
     return folder(b, "GameData", "".join(sections), D)
 
@@ -241,13 +252,26 @@ def text_overrides(text, size=17, scaled=False, x_align=0, wrapped=False, rich=T
 # ---------------------------------------------------------------------------
 
 def menu_buttons(b, gd):
+    """One TextButton per menu, at an explicit slot.
+
+    Slots are hand-picked rather than computed from a grid: the base HUD already
+    occupies most of the screen (2xCash sits at x 0.225+, y 0.899+), so a third
+    grid column would land on top of it. tools/tests/test_content.py asserts there
+    is a slot for every menu and verify.py asserts nothing overlaps.
+    """
     ui = gd["ui"]
     xs, ys = ui["menuGridX"], ui["menuGridY"]
+    slots = ui.get("menuSlots") or []
     w, h = ui["buttonSize"]
     out = []
     for i, menu in enumerate(gd["menus"]):
-        x = xs[i % len(xs)]
-        y = ys[i // len(xs)]
+        if i < len(slots):
+            x, y = slots[i]
+        else:
+            # Past the end of the slot list: fall back to the grid so a new menu
+            # is still visible (and overlapping) rather than silently missing.
+            x = xs[i % len(xs)]
+            y = ys[i // len(xs)]
         props = {
             "Position": ("UDim2", (x, 0, y, 0)),
             "Size": ("UDim2", (w, 0, h, 0)),
@@ -302,12 +326,35 @@ def row_template(b, ui, depth=D + 2):
 
     sub_props = {
         "BackgroundTransparency": 1.0,
-        "Position": ("UDim2", (0, 12, 1, -18)),
-        "Size": ("UDim2", (1, -24, 0, 16)),
+        "Position": ("UDim2", (0, 12, 1, -26)),
+        "Size": ("UDim2", (1, -24, 0, 18)),
         "Visible": True,
         "ZIndex": 3,
     }
     sub_props.update(text_overrides("", size=13, x_align=0, color=(150, 160, 185)))
+
+    # Optional progress bar, hidden by default: Quests shows it, the other menus
+    # leave it alone. Living in the shared template means it costs nothing and any
+    # menu can use it later.
+    bar_props = {
+        "BackgroundColor3": ("Color3", (16, 18, 26)),
+        "BackgroundTransparency": 0.15,
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0, 12, 1, -8)),
+        "Size": ("UDim2", (1, -24, 0, 6)),
+        "Visible": False,
+        "ZIndex": 3,
+        "ClipsDescendants": True,
+    }
+    fill_props = {
+        "BackgroundColor3": ("Color3", tuple(ui["accent"])),
+        "BackgroundTransparency": 0.0,
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0, 0, 0, 0)),
+        "Size": ("UDim2", (0, 0, 1, 0)),
+        "Visible": True,
+        "ZIndex": 4,
+    }
 
     children = (
         ui_corner(b, 8, depth=depth + 1)
@@ -315,6 +362,12 @@ def row_template(b, ui, depth=D + 2):
         + ui_padding(b, 12, 12, 0, 0, depth=depth + 1)
         + b.item("TextLabel", "Info", info_props, depth=depth + 1)[0]
         + b.item("TextLabel", "Subtitle", sub_props, depth=depth + 1)[0]
+        + b.item("Frame", "Bar", bar_props,
+                 children=(ui_corner(b, 3, "BarCorner", depth=depth + 2)
+                           + b.item("Frame", "Fill", fill_props,
+                                    children=ui_corner(b, 3, depth=depth + 3),
+                                    depth=depth + 2)[0]),
+                 depth=depth + 1)[0]
     )
     return b.item("TextButton", "RowTemplate", props, children=children, depth=depth)[0]
 
@@ -344,6 +397,7 @@ def menu_frames(b, gd):
         accent = menu["color"]
         has_status = bool(menu.get("status"))
         has_bar = bool(menu.get("commandBar"))
+        has_claim_all = bool(menu.get("claimAll"))
 
         list_top = 0.245 if has_status else 0.14
         if has_bar:
@@ -416,9 +470,11 @@ def menu_frames(b, gd):
         )
 
         if has_status:
+            # A claim-all button shares this line, so the status text gives way.
+            status_width = 0.66 if has_claim_all else 0.94
             status_props = {
                 "Position": ("UDim2", (0.03, 0, 0.135, 0)),
-                "Size": ("UDim2", (0.94, 0, 0.085, 0)),
+                "Size": ("UDim2", (status_width, 0, 0.085, 0)),
                 "BackgroundColor3": ("Color3", (18, 20, 30)),
                 "BackgroundTransparency": 0.35,
                 "BorderSizePixel": 0,
@@ -429,6 +485,23 @@ def menu_frames(b, gd):
                                                color=(255, 220, 120)))
             children += b.item("TextLabel", "Status", status_props,
                                children=text_size(b, 20, 10, depth=D + 2), depth=D + 1)[0]
+
+        if has_claim_all:
+            claim_props = {
+                "Position": ("UDim2", (0.71, 0, 0.135, 0)),
+                "Size": ("UDim2", (0.26, 0, 0.085, 0)),
+                "BackgroundColor3": ("Color3", tuple(accent)),
+                "BackgroundTransparency": 0.0,
+                "BorderSizePixel": 0,
+                "Visible": True,
+                "ZIndex": 4,
+                "AutoButtonColor": True,
+            }
+            claim_props.update(text_overrides("Claim All", size=16, scaled=True, x_align=2))
+            children += b.item("TextButton", "ClaimAll", claim_props,
+                               children=(ui_corner(b, 8, depth=D + 2)
+                                         + text_size(b, 18, 9, depth=D + 2)),
+                               depth=D + 1)[0]
 
         if has_bar:
             bar_props = {
@@ -484,6 +557,114 @@ def menu_frames(b, gd):
 
         out.append(b.item("Frame", name, frame_props, children=children, depth=D)[0])
     return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# kill feed and zone warning (StarterGui)
+# ---------------------------------------------------------------------------
+
+def killfeed(b, gd):
+    """StarterGui/KillFeed: top-centre strip that reports who ate whom.
+
+    Top centre is the one region of the screen neither Roblox core UI (chat
+    top-left, player list top-right) nor this game's HUD uses.
+    """
+    ui = gd["ui"]
+    entry_props = {
+        "BackgroundColor3": ("Color3", (16, 18, 26)),
+        "BackgroundTransparency": 0.2,
+        "BorderSizePixel": 0,
+        "Size": ("UDim2", (1, 0, 0, 26)),
+        "Visible": False,          # template
+        "ZIndex": 2,
+        "LayoutOrder": 0,
+        "ClipsDescendants": False,
+    }
+    entry_props.update(text_overrides("", size=15, x_align=0, color=(235, 240, 255)))
+
+    entries_props = {
+        "AnchorPoint": ("Vector2", (0.5, 0)),
+        "BackgroundColor3": ("Color3", (0, 0, 0)),
+        "BackgroundTransparency": 1.0,
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0.5, 0, 0.06, 0)),
+        "Size": ("UDim2", (0, 420, 0, 160)),
+        "Visible": True,
+        "ZIndex": 1,
+        "ClipsDescendants": False,
+    }
+
+    entries = b.item("Frame", "Entries", entries_props,
+                     children=(ui_list_layout(b, 4, 2, 0, 0, depth=D + 2)
+                               + b.item("TextLabel", "Entry", entry_props,
+                                        children=(ui_corner(b, 6, depth=D + 3)
+                                                  + ui_padding(b, 10, 10, 0, 0, depth=D + 3)
+                                                  + text_size(b, 17, 9, depth=D + 3)),
+                                        depth=D + 2)[0]),
+                     depth=D + 1)[0]
+
+    gui_props = {
+        "DisplayOrder": 6,
+        "Enabled": True,
+        "ResetOnSpawn": False,     # one client script: a reset would strand it
+        "ScreenInsets": 1,         # CoreUISafeInsets
+        "ZIndexBehavior": 1,
+    }
+    return b.item("ScreenGui", "KillFeed", gui_props, children=entries, depth=D)[0]
+
+
+def zonewarn(b, gd):
+    """StarterGui/ZoneWarn: red edge + reason when standing in a locked zone.
+
+    The server already refuses the food and the teleport; this is the part that
+    stops the gate feeling arbitrary.
+    """
+    label_props = {
+        "AnchorPoint": ("Vector2", (0.5, 0)),
+        "BackgroundColor3": ("Color3", (16, 18, 26)),
+        "BackgroundTransparency": 0.15,
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0.5, 0, 0.24, 0)),
+        "Size": ("UDim2", (0, 460, 0, 44)),
+        "Visible": True,
+        "ZIndex": 3,
+    }
+    label_props.update(text_overrides("", size=19, scaled=True, x_align=2, color=(255, 170, 150)))
+
+    tint_props = {
+        "BackgroundColor3": ("Color3", (0, 0, 0)),
+        "BackgroundTransparency": 1.0,
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0, 0, 0, 0)),
+        "Size": ("UDim2", (1, 0, 1, 0)),
+        "Visible": False,
+        "ZIndex": 2,
+        "ClipsDescendants": False,
+    }
+
+    tint = b.item("Frame", "Tint", tint_props,
+                  children=(b.item("UIStroke", "UIStroke", {
+                                      "ApplyStrokeMode": 0,     # Border
+                                      "Color": ("Color3", (235, 70, 70)),
+                                      "Thickness": 16.0,
+                                      "Transparency": 0.35,
+                                      "Enabled": True,
+                                      "LineJoinMode": 2,
+                                  }, depth=D + 2)[0]
+                            + b.item("TextLabel", "Label", label_props,
+                                     children=(ui_corner(b, 10, depth=D + 3)
+                                               + text_size(b, 22, 10, depth=D + 3)),
+                                     depth=D + 2)[0]),
+                  depth=D + 1)[0]
+
+    gui_props = {
+        "DisplayOrder": 7,
+        "Enabled": True,
+        "ResetOnSpawn": False,
+        "ScreenInsets": 0,        # None: the edge tint has to reach the real edge
+        "ZIndexBehavior": 1,
+    }
+    return b.item("ScreenGui", "ZoneWarn", gui_props, children=tint, depth=D)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +817,7 @@ def build(b, gd):
         "ReplicatedStorage/Events": events(b, gd),
         "StarterGui/Buttons": menu_buttons(b, gd),
         "StarterGui/Frames": menu_frames(b, gd),
+        "StarterGui": killfeed(b, gd) + zonewarn(b, gd),
         "Workspace": zones(b, gd),
     }
 

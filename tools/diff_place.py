@@ -149,6 +149,7 @@ def actual(place, gd):
     out["products"] = place.value(data + "/Products") or {}
     out["gamepasses"] = place.value(data + "/Gamepasses") or {}
     out["updateLog"] = place.value(data + "/UpdateLog") or {}
+    out["prefs"] = place.value(data + "/Prefs") or {}
     out["events"] = sorted(place.names("ReplicatedStorage/Events"))
 
     zones = {}
@@ -204,6 +205,8 @@ def expected(gd):
     out["gamepasses"] = dict((p["id"], {"GamePassId": float(p["gamePassId"]), "Kind": p["kind"]})
                              for p in gd["gamepasses"])
     out["updateLog"] = dict((str(i), text) for i, text in enumerate(gd.get("updateLog", []), start=1))
+    out["prefs"] = dict((k, float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v)
+                        for k, v in gd.get("prefs", {}).items())
     out["events"] = sorted(gd["events"])
 
     floor_y = float(gd["settings"]["ZoneFloorY"])

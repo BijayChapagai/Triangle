@@ -9,6 +9,8 @@
     "Edit this file only if you want the change to survive a rebuild."
   ],
   "settings": {
+    "AutoFarmAvoidDistance": 45,
+    "AutoFarmFleeDistance": 70,
     "BaseFoodTarget": 420,
     "CameraFov": 70,
     "CameraFovPunch": 6,
@@ -22,6 +24,8 @@
     "GroupId": 34195654,
     "HeartbeatInterval": 2,
     "KillCash": 25,
+    "KillFeedLifetime": 6,
+    "KillFeedMax": 5,
     "KillSizeCap": 25000,
     "KillSizeTransfer": 0.1,
     "LeaderboardSize": 50,
@@ -60,7 +64,8 @@
     "WallInnerX": 278.5,
     "WallInnerZ": 328.5,
     "ZoneFloorY": 0.05,
-    "ZoneFoodTarget": 60
+    "ZoneFoodTarget": 60,
+    "ZoneTeleportCooldown": 5
   },
   "admins": [
     {
@@ -577,7 +582,10 @@
     "QuestClaim",
     "ZoneTeleport",
     "Admin",
-    "Notify"
+    "Notify",
+    "KillFeed",
+    "QuestClaimAll",
+    "SavePrefs"
   ],
   "menus": [
     {
@@ -605,7 +613,9 @@
         110,
         210,
         110
-      ]
+      ],
+      "status": true,
+      "claimAll": true
     },
     {
       "name": "Zones",
@@ -635,9 +645,48 @@
         70
       ],
       "commandBar": true
+    },
+    {
+      "name": "Settings",
+      "label": "Settings",
+      "color": [
+        150,
+        160,
+        190
+      ]
     }
   ],
   "ui": {
+    "menuSlots": [
+      [
+        0.026,
+        0.757
+      ],
+      [
+        0.107,
+        0.757
+      ],
+      [
+        0.026,
+        0.837
+      ],
+      [
+        0.107,
+        0.837
+      ],
+      [
+        0.026,
+        0.917
+      ],
+      [
+        0.107,
+        0.917
+      ],
+      [
+        0.182,
+        0.757
+      ]
+    ],
     "menuGridX": [
       0.026,
       0.107
@@ -681,6 +730,14 @@
       255
     ],
     "rowHeight": 46
+  },
+  "prefs": {
+    "AutoFarmFlee": true,
+    "CameraPunch": true,
+    "KillFeed": true,
+    "MusicVolume": 0.6,
+    "ReducedMotion": false,
+    "UiScale": 1.0
   },
   "notifier": {
     "kinds": {

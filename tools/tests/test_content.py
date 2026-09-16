@@ -221,10 +221,16 @@ def test_gamepasses(gd):
 
 # --- ui ---------------------------------------------------------------------
 
-def test_menus_fit_the_button_grid(gd):
-    grid = gd["ui"]["menuGridX"], gd["ui"]["menuGridY"]
-    assert len(gd["menus"]) <= len(grid[0]) * len(grid[1]), (
-        "more menus than grid slots: extend ui.menuGridX/menuGridY")
+def test_menus_have_a_button_slot(gd):
+    """Slots are hand-picked; verify.py checks they do not overlap the base HUD."""
+    slots = gd["ui"]["menuSlots"]
+    assert len(gd["menus"]) <= len(slots), (
+        "more menus than slots: add one to ui.menuSlots")
+    assert len(set(tuple(s) for s in slots)) == len(slots), "two menus share a slot"
+    w, h = gd["ui"]["buttonSize"]
+    for x, y in slots:
+        assert 0 <= x and x + w <= 1, "slot %s is off screen" % [x, y]
+        assert 0 <= y and y + h <= 1, "slot %s is off screen" % [x, y]
     names = [m["name"] for m in gd["menus"]]
     assert len(names) == len(set(names))
     assert all(color_ok(m["color"]) and m["label"] for m in gd["menus"])
@@ -246,3 +252,20 @@ def test_events_are_unique_identifiers(gd):
 def test_update_log_is_non_empty_text(gd):
     assert gd["updateLog"]
     assert all(isinstance(t, str) and t.strip() for t in gd["updateLog"])
+
+
+def test_prefs_defaults(gd):
+    """The settings menu is built from these, so the types are the contract."""
+    prefs = gd["prefs"]
+    assert isinstance(prefs["MusicVolume"], float) and 0 <= prefs["MusicVolume"] <= 1
+    assert isinstance(prefs["UiScale"], float) and 0.5 <= prefs["UiScale"] <= 2
+    for key in ("CameraPunch", "KillFeed", "ReducedMotion", "AutoFarmFlee"):
+        assert isinstance(prefs[key], bool), "%s must be a BoolValue" % key
+
+
+def test_autofarm_distances_are_sane(gd):
+    s = gd["settings"]
+    assert s["AutoFarmFleeDistance"] > s["AutoFarmAvoidDistance"] > 0
+    assert s["ZoneTeleportCooldown"] >= 0
+    assert s["SpawnProtection"] >= 0
+    assert s["KillFeedMax"] > 0 and s["KillFeedLifetime"] > 0

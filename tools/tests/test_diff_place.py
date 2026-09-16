@@ -81,4 +81,7 @@ def test_json_dump(tmp_path):
     assert got["zones"]["Greenfield"]["Id"] == 1.0
     assert got["zones"]["Greenfield"]["Top"] == 0.05
     assert got["menuFrames"]["Rebirth"] == {"Button": True, "Frame": True}
-    assert len(got["events"]) == 15
+    with open(GAMEDATA, encoding="utf-8") as f:
+        want = json.load(f)
+    assert sorted(got["events"]) == sorted(want["events"])
+    assert got["prefs"]["MusicVolume"] == want["prefs"]["MusicVolume"]
