@@ -591,28 +591,31 @@
     {
       "name": "Rebirth",
       "label": "Rebirth",
+      "icon": "rbxassetid://118457362979224",
       "color": [
         255,
-        120,
-        40
+        170,
+        0
       ]
     },
     {
       "name": "Skins",
       "label": "Skins",
+      "icon": "rbxassetid://104510768093702",
       "color": [
-        60,
-        200,
-        180
+        255,
+        0,
+        127
       ]
     },
     {
       "name": "Quests",
       "label": "Quests",
+      "icon": "rbxassetid://140055770728143",
       "color": [
-        110,
-        210,
-        110
+        35,
+        255,
+        70
       ],
       "status": true,
       "claimAll": true
@@ -620,116 +623,261 @@
     {
       "name": "Zones",
       "label": "Zones",
+      "icon": "rbxassetid://110631703137481",
       "color": [
-        90,
-        160,
-        245
+        85,
+        255,
+        255
       ],
       "status": true
     },
     {
       "name": "Leaderboard",
       "label": "Ranks",
+      "icon": "rbxassetid://13801406576",
       "color": [
-        170,
-        110,
-        245
+        249,
+        173,
+        0
       ]
     },
     {
       "name": "Admin",
       "label": "Admin",
+      "icon": "rbxassetid://84556369840359",
       "color": [
-        200,
-        70,
-        70
+        255,
+        60,
+        60
       ],
       "commandBar": true
     },
     {
       "name": "Settings",
       "label": "Settings",
+      "icon": "rbxassetid://82936983585929",
       "color": [
-        150,
-        160,
-        190
+        170,
+        85,
+        255
       ]
     }
   ],
   "ui": {
+    "_readme": [
+      "Generated menus are built in the style the place already ships with, so they",
+      "sit next to the original HUD instead of on top of it: purple icon buttons",
+      "with a black outline and a caption underneath (StarterGui/Buttons/Music),",
+      "white panels with a purple title (StarterGui/Frames/UpdateLog), cyan rows",
+      "with chunky FredokaOne text (StarterGui/Frames/Rewards/Rewards/Reward1).",
+      "Every colour, image and font below is one the base place already uses.",
+      "Restyle by editing these numbers - the generator only lays them out."
+    ],
     "menuSlots": [
       [
-        0.026,
-        0.757
+        0.2393,
+        0.012
       ],
       [
-        0.107,
-        0.757
+        0.3158,
+        0.012
       ],
       [
-        0.026,
-        0.837
+        0.3923,
+        0.012
       ],
       [
-        0.107,
-        0.837
+        0.4688,
+        0.012
       ],
       [
-        0.026,
-        0.917
+        0.5453,
+        0.012
       ],
       [
-        0.107,
-        0.917
+        0.6218,
+        0.012
       ],
       [
-        0.182,
-        0.757
+        0.6983,
+        0.012
       ]
     ],
     "menuGridX": [
-      0.026,
-      0.107
+      0.2393,
+      0.3158,
+      0.3923,
+      0.4688,
+      0.5453,
+      0.6218,
+      0.6983
     ],
     "menuGridY": [
-      0.757,
-      0.837,
-      0.917
+      0.012,
+      0.135
     ],
     "buttonSize": [
-      0.075,
-      0.075
+      0.062,
+      0.102
     ],
+    "buttonAspect": 0.995738626,
+    "buttonCorner": 8,
+    "buttonStroke": [
+      0,
+      0,
+      0
+    ],
+    "buttonStrokeWidth": 4.5,
+    "buttonPlate": "rbxassetid://116374907473809",
+    "iconSize": 0.773333311,
+    "iconInset": 0.106666461,
+    "captionSize": [
+      2.66666675,
+      0.306666672
+    ],
+    "captionPosition": [
+      -0.838627338,
+      0.890537024
+    ],
+    "captionMaxText": 23,
     "frameSize": [
       0.5,
       0.62
     ],
     "panelColor": [
-      22,
-      23,
-      33
-    ],
-    "titleColor": [
-      30,
-      34,
-      52
-    ],
-    "listColor": [
-      16,
-      17,
-      26
-    ],
-    "rowColor": [
-      20,
-      22,
-      34
-    ],
-    "accent": [
-      90,
-      140,
+      255,
+      255,
       255
     ],
-    "rowHeight": 46
+    "panelCorner": 0.025,
+    "panelStroke": [
+      0,
+      0,
+      0
+    ],
+    "panelStrokeWidth": 4.5,
+    "titleColor": [
+      170,
+      85,
+      255
+    ],
+    "titleStrokeWidth": 3,
+    "titleSize": [
+      0.4,
+      0.115
+    ],
+    "listColor": [
+      255,
+      255,
+      255
+    ],
+    "scrollBarThickness": 11,
+    "rowColor": [
+      0,
+      200,
+      255
+    ],
+    "rowStroke": [
+      0,
+      0,
+      0
+    ],
+    "rowStrokeWidth": 3,
+    "rowCorner": 8,
+    "rowHeight": 54,
+    "rowText": [
+      255,
+      255,
+      255
+    ],
+    "subText": [
+      249,
+      173,
+      0
+    ],
+    "sectionColor": [
+      170,
+      85,
+      255
+    ],
+    "sectionText": [
+      255,
+      255,
+      255
+    ],
+    "actionColor": [
+      35,
+      255,
+      70
+    ],
+    "closeColor": [
+      255,
+      85,
+      255
+    ],
+    "inputColor": [
+      190,
+      190,
+      190
+    ],
+    "inputText": [
+      60,
+      60,
+      60
+    ],
+    "barTrack": [
+      190,
+      190,
+      190
+    ],
+    "barFill": [
+      35,
+      255,
+      70
+    ],
+    "accent": [
+      170,
+      85,
+      255
+    ],
+    "fonts": {
+      "main": "rbxassetid://12187365977",
+      "mainWeight": 700,
+      "alt": "rbxasset://fonts/families/FredokaOne.json",
+      "altWeight": 400
+    },
+    "killFeed": {
+      "y": 0.17,
+      "width": 430,
+      "height": 168,
+      "entryHeight": 28,
+      "color": [
+        170,
+        85,
+        255
+      ],
+      "transparency": 0.15,
+      "text": [
+        255,
+        255,
+        255
+      ]
+    },
+    "zoneWarn": {
+      "y": 0.34,
+      "width": 470,
+      "height": 46,
+      "edge": [
+        235,
+        70,
+        70
+      ],
+      "text": [
+        249,
+        173,
+        0
+      ]
+    }
   },
   "prefs": {
     "AutoFarmFlee": true,
@@ -742,19 +890,19 @@
   "notifier": {
     "kinds": {
       "info": [
-        90,
-        160,
-        245
+        170,
+        85,
+        255
       ],
       "good": [
-        110,
-        220,
-        140
+        35,
+        255,
+        70
       ],
       "bad": [
-        235,
-        90,
-        90
+        255,
+        60,
+        60
       ]
     }
   },

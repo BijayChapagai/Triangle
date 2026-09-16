@@ -10,8 +10,8 @@ local UiModule = require(ReplicatedStorage:WaitForChild("UiModule"))
 local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
 
 local FRAME_NAME = "Quests"
-local READY = Color3.fromRGB(110, 220, 140)
-local CLAIMED = Color3.fromRGB(150, 160, 185)
+local READY = Color3.fromRGB(35, 255, 70)     -- the shipped BUY green
+local CLAIMED = Color3.fromRGB(40, 60, 90)
 local client, frame
 local progress = {}   -- quest id -> { progress, claimed }
 local statusLabel, claimAll
@@ -54,7 +54,7 @@ local function refresh()
 		end
 
 		MenuUi.addRow(frame, {
-			info = entry.claimed and ('<font color="rgb(150,160,185)">%s</font>'):format(quest.text) or quest.text,
+			info = entry.claimed and ('<font color="rgb(30,50,70)">%s</font>'):format(quest.text) or quest.text,
 			sub = ("%d/%d   |   %s   |   %s"):format(
 				current, quest.goal,
 				entry.claimed and "CLAIMED" or (ready and "TAP TO CLAIM" or "In progress"),

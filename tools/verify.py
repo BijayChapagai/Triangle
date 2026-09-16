@@ -734,6 +734,95 @@ def main():
                             "(custom characters / a single client script depend on it)"
                             % (path, name, got, want))
 
+    # ---- 4c. generated UI still wears the shipped style --------------------
+    # The menus are generated, so nothing stops a Studio session from repainting
+    # them away from the HUD they sit next to - and a mismatched menu bar is the
+    # kind of damage nobody reports until players complain the game looks cheap.
+    # Everything asserted here is a value the base place already uses: the button
+    # plate image, the icon per menu, the two font families, white panels with a
+    # black outline, purple titles, cyan rows.
+    ui = gd.get("ui") or {}
+    ui_fonts = ui.get("fonts") or {}
+
+    def rgb_of(inner):
+        vals = re.findall(r"<[RGB]>([-\d.e]+)</[RGB]>", inner or "")
+        return tuple(int(round(float(v) * 255)) for v in vals) if len(vals) == 3 else None
+
+    def url_of(inner):
+        m = re.search(r"<url>([^<]*)</url>", inner or "")
+        return m.group(1) if m else None
+
+    def want_rgb(key, default):
+        return tuple(ui.get(key, default))
+
+    for menu in gd["menus"]:
+        name = menu["name"]
+        bpath = "StarterGui/Buttons/%s" % name
+        ref = by_path.get(bpath, [None])[0]
+        if ref is None:
+            continue          # reported by the frame/button presence checks
+        if items[ref]["class"] != "ImageButton":
+            problems.append("%s is a %s; the HUD bar it joins is icon buttons"
+                            % (bpath, items[ref]["class"]))
+        got = rgb_of(prop_of(bpath, "BackgroundColor3"))
+        if got != tuple(menu["color"]):
+            problems.append("%s body is %s but gamedata says %s"
+                            % (bpath, got, tuple(menu["color"])))
+        plate = ui.get("buttonPlate")
+        if plate and url_of(prop_of(bpath, "Image")) != plate:
+            problems.append("%s does not carry the shipped button plate %s" % (bpath, plate))
+        for kid in ("TextLabel", "UICorner", "UIStroke", "UIAspectRatioConstraint"):
+            if "%s/%s" % (bpath, kid) not in by_path:
+                problems.append("%s has no %s child (the shipped HUD buttons all have one)"
+                                % (bpath, kid))
+
+        icon = "%s/ImageLabel" % bpath
+        if icon not in by_path:
+            problems.append("%s has no ImageLabel icon - UiModule.Animate wiggles that child"
+                            % bpath)
+        elif url_of(prop_of(icon, "Image")) != menu.get("icon"):
+            problems.append("%s shows %r but gamedata says the icon is %r"
+                            % (icon, url_of(prop_of(icon, "Image")), menu.get("icon")))
+
+        fpath = "StarterGui/Frames/%s" % name
+        if fpath not in by_path:
+            continue
+        panel = want_rgb("panelColor", (255, 255, 255))
+        got = rgb_of(prop_of(fpath, "BackgroundColor3"))
+        if got != panel:
+            problems.append("menu panel %s is %s; the shipped panels are %s" % (fpath, got, panel))
+        outline = "%s/UIStroke" % fpath
+        if outline in by_path:
+            got = rgb_of(prop_of(outline, "Color"))
+            if got != want_rgb("panelStroke", (0, 0, 0)):
+                problems.append("%s outline is %s, the shipped panels outline in %s"
+                                % (outline, got, want_rgb("panelStroke", (0, 0, 0))))
+
+        title = "%s/Title" % fpath
+        if title in by_path:
+            got = rgb_of(prop_of(title, "TextColor3"))
+            if got != want_rgb("titleColor", (170, 85, 255)):
+                problems.append("%s is %s; panel titles are %s"
+                                % (title, got, want_rgb("titleColor", (170, 85, 255))))
+            face = prop_of(title, "FontFace") or ""
+            if ui_fonts.get("main") and ui_fonts["main"] not in face:
+                problems.append("%s is not set in %s" % (title, ui_fonts["main"]))
+
+        row = "%s/List/RowTemplate" % fpath
+        if row in by_path:
+            got = rgb_of(prop_of(row, "BackgroundColor3"))
+            if got != want_rgb("rowColor", (0, 200, 255)):
+                problems.append("%s is %s; menu rows are %s"
+                                % (row, got, want_rgb("rowColor", (0, 200, 255))))
+            for label in ("Info", "Subtitle"):
+                lpath = "%s/%s" % (row, label)
+                if lpath in by_path and "%s/UIStroke" % lpath not in by_path:
+                    problems.append("%s has no outline; row text is unreadable over the arena"
+                                    % lpath)
+                face = prop_of(lpath, "FontFace") or ""
+                if ui_fonts.get("alt") and ui_fonts["alt"] not in face:
+                    problems.append("%s is not set in %s" % (lpath, ui_fonts["alt"]))
+
     admins = child_names(items, by_path["ReplicatedStorage/GameData/Admins"][0])
     if not admins:
         problems.append("GameData/Admins is empty - nobody can use the console")

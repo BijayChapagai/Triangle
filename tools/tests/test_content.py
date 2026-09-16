@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from conftest import GAMEDATA
+from conftest import BASE, GAMEDATA, read
 
 # The kinds the server actually handles. Adding one here without a handler in
 # Shop.lua / Progression.lua / Gifts.lua is a bug, and vice versa.
@@ -269,3 +269,95 @@ def test_autofarm_distances_are_sane(gd):
     assert s["ZoneTeleportCooldown"] >= 0
     assert s["SpawnProtection"] >= 0
     assert s["KillFeedMax"] > 0 and s["KillFeedLifetime"] > 0
+
+
+# --- generated UI wears the shipped look ------------------------------------
+# The menus are generated next to a HUD that was built by hand in Studio, so the
+# rule is: use its assets, its fonts and its palette. Every check below compares
+# gamedata.json against the base place rather than against a hard-coded list, so
+# "same assets as the game" stays true if the game's assets change.
+
+@pytest.fixture(scope="session")
+def shipped_assets():
+    """Every asset URL the base place already references."""
+    import re
+
+    return set(re.findall(
+        r"<url>((?:rbxassetid://|rbxasset://|https?://[^<]*roblox\.com/asset/)[^<]*)</url>",
+        read(BASE)))
+
+
+def asset_id(url):
+    """The numeric id, so rbxassetid://N and the legacy www.roblox.com/asset/?id=N
+    form count as the same art - the shipped HUD uses both for the same icons."""
+    import re
+
+    m = re.search(r"(\d{5,})", url or "")
+    return m.group(1) if m else None
+
+
+def shipped_ids(shipped_assets):
+    return set(filter(None, (asset_id(u) for u in shipped_assets)))
+
+
+def test_menu_icons_are_assets_the_game_already_ships(gd, shipped_assets):
+    shipped = shipped_ids(shipped_assets)
+    for menu in gd["menus"]:
+        assert asset_id(menu.get("icon")) in shipped, (
+            "%s icon %r is not art the base place already uses - the menu bar would "
+            "be the only place in the game with that icon" % (menu["name"], menu.get("icon")))
+
+
+def test_button_plate_is_the_shipped_one(gd, shipped_assets):
+    plate = gd["ui"]["buttonPlate"]
+    assert asset_id(plate) in shipped_ids(shipped_assets), plate
+
+
+def test_ui_fonts_are_the_shipped_families(gd, shipped_assets):
+    fonts = gd["ui"]["fonts"]
+    assert fonts["main"] in shipped_assets, fonts["main"]
+    assert fonts["alt"] in shipped_assets, fonts["alt"]
+    assert fonts["mainWeight"] in (400, 500, 700, 900)
+    assert fonts["altWeight"] in (400, 500, 700, 900)
+
+
+def test_menu_buttons_sit_in_the_free_top_band(gd):
+    """One row along the top: the original HUD owns both side columns (Invite
+    .. VIP) and the bottom band (2xCash, KillAll, 2xSpeed), and verify.py fails
+    the build if a generated button lands on any of them."""
+    ui = gd["ui"]
+    slots = ui["menuSlots"][:len(gd["menus"])]
+    w, h = ui["buttonSize"]
+    ys = sorted(set(y for _x, y in slots))
+    assert len(ys) == 1, "menu buttons must sit on one row, got %s" % ys
+    assert ys[0] + h < 0.2, "the menu row belongs above the original HUD (y=%s)" % ys[0]
+
+    xs = [x for x, _y in slots]
+    assert xs == sorted(xs), "slots must run left to right"
+    for a, b in zip(xs, xs[1:]):
+        assert b - a >= w, "buttons at %s and %s would touch (width %s)" % (a, b, w)
+    assert xs[0] >= 0 and xs[-1] + w <= 1, "the row must fit on screen"
+
+
+def test_ui_palette_is_real_colors(gd):
+    ui = gd["ui"]
+    keys = ("panelColor", "panelStroke", "titleColor", "rowColor", "rowStroke", "rowText",
+            "subText", "sectionColor", "sectionText", "actionColor", "closeColor",
+            "inputColor", "inputText", "barTrack", "barFill", "accent", "buttonStroke")
+    for key in keys:
+        assert color_ok(ui[key]), "%s is %r" % (key, ui[key])
+    for menu in gd["menus"]:
+        assert color_ok(menu["color"]), menu
+    for key in ("killFeed", "zoneWarn"):
+        for name, value in ui[key].items():
+            if isinstance(value, list):
+                assert color_ok(value), "%s.%s is %r" % (key, name, value)
+
+
+def test_notifier_kinds_match_the_palette(gd):
+    """Toasts, quest rows and zone rows all mean the same thing by a colour."""
+    kinds = gd["notifier"]["kinds"]
+    ui = gd["ui"]
+    assert kinds["good"] == ui["actionColor"], "good toasts and action buttons disagree"
+    assert kinds["bad"] == [255, 60, 60], kinds["bad"]
+    assert kinds["info"] == ui["accent"], "info toasts should use the game purple"

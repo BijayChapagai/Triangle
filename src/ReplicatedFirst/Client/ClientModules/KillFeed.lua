@@ -100,7 +100,7 @@ function KillFeed.Init(c)
 
 		local text = ('<b>%s</b> ate <b>%s</b>'):format(killer, victim)
 		if absorbed > 0 then
-			text = text .. ('   <font color="rgb(140,235,160)">+%s</font>'):format(UiModule.Format(absorbed))
+			text = text .. ('   <font color="rgb(140,255,170)">+%s</font>'):format(UiModule.Format(absorbed))
 		end
 		push(text)
 	end)

@@ -10,7 +10,7 @@ local UiModule = require(ReplicatedStorage:WaitForChild("UiModule"))
 local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
 
 local FRAME_NAME = "Skins"
-local EQUIPPED = Color3.fromRGB(110, 220, 140)
+local EQUIPPED = Color3.fromRGB(35, 255, 70)  -- the shipped BUY green
 
 local client, player, frame
 local owned = {}

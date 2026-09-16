@@ -9,9 +9,9 @@ local GameConfig = require(ReplicatedStorage.Modules:WaitForChild("GameConfig"))
 local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
 
 local FRAME_NAME = "Zones"
-local OPEN = Color3.fromRGB(110, 220, 140)
-local LOCKED = Color3.fromRGB(235, 90, 90)
-local VIP_COLOR = Color3.fromRGB(255, 205, 90)
+local OPEN = Color3.fromRGB(35, 255, 70)      -- the shipped BUY green
+local LOCKED = Color3.fromRGB(255, 60, 60)
+local VIP_COLOR = Color3.fromRGB(249, 173, 0) -- the shipped timer gold
 
 local client, player, frame
 local statusLabel
@@ -91,7 +91,7 @@ local function refresh()
 	local vip = GameConfig.VIP
 	local hasVip = player:GetAttribute("VIP") == true
 	MenuUi.addRow(frame, {
-		info = ('<font color="rgb(255,205,90)">VIP wing</font>'),
+		info = ('<font color="rgb(249,173,0)">VIP wing</font>'),
 		sub = hasVip and ("%s+ cubes  |  Tap to travel"):format(vip.RarityFloor)
 			or ("%s+ cubes  |  VIP gamepass required"):format(vip.RarityFloor),
 		accent = hasVip and OPEN or VIP_COLOR,

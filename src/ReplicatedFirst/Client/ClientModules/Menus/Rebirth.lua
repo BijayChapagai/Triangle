@@ -9,8 +9,8 @@ local UiModule = require(ReplicatedStorage:WaitForChild("UiModule"))
 local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
 
 local FRAME_NAME = "Rebirth"
-local READY = Color3.fromRGB(110, 220, 140)
-local LOCKED = Color3.fromRGB(235, 90, 90)
+local READY = Color3.fromRGB(35, 255, 70)     -- the shipped BUY green
+local LOCKED = Color3.fromRGB(255, 60, 60)
 
 local client, player, frame
 local state = { rebirths = 0, mult = 1, required = 0 }

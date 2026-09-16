@@ -9,7 +9,7 @@ local UiModule = require(ReplicatedStorage:WaitForChild("UiModule"))
 local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
 
 local FRAME_NAME = "Leaderboard"
-local ME = Color3.fromRGB(255, 205, 90)
+local ME = Color3.fromRGB(249, 173, 0)      -- the gold the shipped UI uses for timers
 
 local client, player, frame
 local cache = { Size = {}, Cash = {} }

@@ -159,3 +159,46 @@ def test_no_source_opens_a_datastore_at_module_scope():
             if "module scope" in why and pattern.search(source):
                 offenders.append(os.path.basename(path))
     assert offenders == [], offenders
+
+
+# The generated menus sit next to a HUD that was built by hand in Studio, so the
+# style is a contract: repaint a panel or swap an icon in Studio and the build
+# should refuse, because "the UI does not match the game" is otherwise invisible
+# until a player says the game looks cheap.
+def test_repainted_menu_panel_is_caught(raw, tmp_path):
+    def fn(block):
+        return block.replace('<Color3 name="BackgroundColor3"><R>1</R><G>1</G><B>1</B></Color3>',
+                             '<Color3 name="BackgroundColor3">'
+                             '<R>0.086</R><G>0.09</G><B>0.129</B></Color3>', 1)
+
+    code, out = verify(write(tmp_path / "dark_panel.rbxlx",
+                             replace_span(raw, "StarterGui/Frames/Rebirth", fn)))
+    assert code == 1
+    assert "StarterGui/Frames/Rebirth" in out and "shipped panels" in out
+
+
+def test_swapped_menu_icon_is_caught(raw, tmp_path):
+    def fn(block):
+        return block.replace("rbxassetid://118457362979224", "rbxassetid://1", 1)
+
+    code, out = verify(write(tmp_path / "wrong_icon.rbxlx",
+                             replace_span(raw, "StarterGui/Buttons/Rebirth/ImageLabel", fn)))
+    assert code == 1
+    assert "Buttons/Rebirth/ImageLabel" in out
+
+
+def test_menu_button_must_stay_an_icon_button(raw, tmp_path):
+    def fn(block):
+        return block.replace('<Item class="ImageButton"', '<Item class="TextButton"', 1)
+
+    code, out = verify(write(tmp_path / "text_button.rbxlx",
+                             replace_span(raw, "StarterGui/Buttons/Skins", fn)))
+    assert code == 1
+    assert "StarterGui/Buttons/Skins" in out and "icon buttons" in out
+
+
+def test_missing_button_caption_is_caught(raw, tmp_path):
+    a, b = span(raw, "StarterGui/Buttons/Quests/TextLabel")
+    code, out = verify(write(tmp_path / "no_caption.rbxlx", raw[:a] + raw[b:]))
+    assert code == 1
+    assert "Buttons/Quests" in out and "TextLabel" in out

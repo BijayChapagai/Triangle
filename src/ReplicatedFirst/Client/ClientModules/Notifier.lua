@@ -15,8 +15,8 @@ local MAX = math.max(1, tonumber(GameConfig.get("NotifyMax", 5)) or 5)
 -- Accent colours come from the asset (InfoColor/GoodColor/BadColor Color3Values
 -- next to the Toast template); these are only fallbacks if they are deleted.
 local KIND_COLORS = {
-	good = Color3.fromRGB(110, 220, 140),
-	bad = Color3.fromRGB(235, 90, 90),
+	good = Color3.fromRGB(35, 255, 70),
+	bad = Color3.fromRGB(255, 60, 60),
 }
 
 local template                       -- the Notifier ScreenGui, found in Init

@@ -13,8 +13,8 @@ local UiModule = require(ReplicatedStorage:WaitForChild("UiModule"))
 local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
 
 local FRAME_NAME = "Rewards"
-local READY = Color3.fromRGB(110, 220, 140)
-local CLAIMED = Color3.fromRGB(150, 160, 185)
+local READY = Color3.fromRGB(35, 255, 70)     -- the shipped BUY green
+local CLAIMED = Color3.fromRGB(40, 60, 90)
 
 local client, player, frame, holder
 local entries = {}     -- gift id -> { button, time, amount }

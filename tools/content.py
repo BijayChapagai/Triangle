@@ -179,12 +179,23 @@ def events(b, gd):
 # shared GUI pieces
 # ---------------------------------------------------------------------------
 
-def ui_corner(b, radius=8, name="UICorner", depth=D + 2):
+def ui_corner(b, radius=8, name="UICorner", depth=D + 2, scale=False):
+    """radius is pixels unless scale=True, which is how the shipped panels round."""
+    udim = (radius, 0) if scale else (0, radius)
     return b.item("UICorner", name, {
-        "TopLeftRadius": ("UDim", (0, radius)),
-        "TopRightRadius": ("UDim", (0, radius)),
-        "BottomLeftRadius": ("UDim", (0, radius)),
-        "BottomRightRadius": ("UDim", (0, radius)),
+        "TopLeftRadius": ("UDim", udim),
+        "TopRightRadius": ("UDim", udim),
+        "BottomLeftRadius": ("UDim", udim),
+        "BottomRightRadius": ("UDim", udim),
+    }, depth=depth)[0]
+
+
+def ui_aspect(b, ratio, depth=D + 2):
+    """Square-ish, width driven: the constraint every shipped HUD button carries."""
+    return b.item("UIAspectRatioConstraint", "UIAspectRatioConstraint", {
+        "AspectRatio": float(ratio),
+        "AspectType": 0,       # FitWithinMaxSize
+        "DominantAxis": 0,     # Width
     }, depth=depth)[0]
 
 
@@ -225,12 +236,30 @@ def text_size(b, max_size, min_size=8, depth=D + 2):
     }, depth=depth)[0]
 
 
-FONT = ('<Font name="FontFace"><Family><url>rbxassetid://12187365977</url></Family>'
-        '<Weight>700</Weight><Style>Normal</Style></Font>')
+def font_face(url, weight):
+    return ('<Font name="FontFace"><Family><url>%s</url></Family>'
+            '<Weight>%d</Weight><Style>Normal</Style></Font>' % (url, int(weight)))
+
+
+# The two families the shipped HUD uses: the display face behind every button and
+# panel title, and FredokaOne behind row text (Frames/Rewards, UpdateLog/template).
+FONT = font_face("rbxassetid://12187365977", 700)
+FONT_ALT = font_face("rbxasset://fonts/families/FredokaOne.json", 400)
+
+
+def fonts(ui):
+    """FontFace XML for the families named in gamedata.json, with shipped defaults."""
+    spec = ui.get("fonts") or {}
+    return {
+        "main": ("raw", font_face(spec.get("main", "rbxassetid://12187365977"),
+                                  spec.get("mainWeight", 700))),
+        "alt": ("raw", font_face(spec.get("alt", "rbxasset://fonts/families/FredokaOne.json"),
+                                 spec.get("altWeight", 400))),
+    }
 
 
 def text_overrides(text, size=17, scaled=False, x_align=0, wrapped=False, rich=True,
-                   color=(235, 240, 255), truncate=1):
+                   color=(255, 255, 255), truncate=1, font=None):
     return {
         "Text": text,
         "TextSize": float(size),
@@ -242,8 +271,9 @@ def text_overrides(text, size=17, scaled=False, x_align=0, wrapped=False, rich=T
         "TextWrapped": wrapped,
         "TextTruncate": truncate,
         "TextTransparency": 0.0,
+        # Outlines come from a UIStroke child, the way the shipped UI does it.
         "TextStrokeTransparency": 1.0,
-        "FontFace": ("raw", FONT),
+        "FontFace": font or ("raw", FONT),
     }
 
 
@@ -252,17 +282,31 @@ def text_overrides(text, size=17, scaled=False, x_align=0, wrapped=False, rich=T
 # ---------------------------------------------------------------------------
 
 def menu_buttons(b, gd):
-    """One TextButton per menu, at an explicit slot.
+    """One icon button per menu, built the way the shipped HUD builds theirs.
 
-    Slots are hand-picked rather than computed from a grid: the base HUD already
-    occupies most of the screen (2xCash sits at x 0.225+, y 0.899+), so a third
-    grid column would land on top of it. tools/tests/test_content.py asserts there
-    is a slot for every menu and verify.py asserts nothing overlaps.
+    StarterGui/Buttons/Music is the model: a coloured rounded rect with a black
+    outline, the game's button plate as its Image (which ships invisible, so the
+    body colour shows), an ImageLabel icon that UiModule.Animate wiggles on hover
+    and a caption hanging underneath. Nothing here is a new visual idea.
+
+    The row runs along the top of the safe area because the original HUD already
+    owns both side columns (InviteFriends..VIP) and the bottom band (2xCash,
+    KillAll, 2xSpeed); slots are explicit so verify.py can prove nothing overlaps.
     """
     ui = gd["ui"]
+    F = fonts(ui)
     xs, ys = ui["menuGridX"], ui["menuGridY"]
     slots = ui.get("menuSlots") or []
     w, h = ui["buttonSize"]
+    corner = ui.get("buttonCorner", 8)
+    stroke_rgb = ui.get("buttonStroke", [0, 0, 0])
+    stroke_w = ui.get("buttonStrokeWidth", 4.5)
+    icon_size = ui.get("iconSize", 0.773333311)
+    icon_inset = ui.get("iconInset", 0.106666461)
+    cap_w, cap_h = ui.get("captionSize", [2.66666675, 0.306666672])
+    cap_x, cap_y = ui.get("captionPosition", [-0.838627338, 0.890537024])
+    plate = ui.get("buttonPlate", "")
+
     out = []
     for i, menu in enumerate(gd["menus"]):
         if i < len(slots):
@@ -271,27 +315,66 @@ def menu_buttons(b, gd):
             # Past the end of the slot list: fall back to the grid so a new menu
             # is still visible (and overlapping) rather than silently missing.
             x = xs[i % len(xs)]
-            y = ys[i // len(xs)]
+            y = ys[min(i // len(xs), len(ys) - 1)]
+
         props = {
             "Position": ("UDim2", (x, 0, y, 0)),
             "Size": ("UDim2", (w, 0, h, 0)),
             "AnchorPoint": ("Vector2", (0, 0)),
-            "BackgroundColor3": ("Color3", tuple(ui["panelColor"])),
-            "BackgroundTransparency": 0.05,
+            "BackgroundColor3": ("Color3", tuple(menu["color"])),
+            "BackgroundTransparency": 0.0,
             "BorderSizePixel": 0,
+            "Image": ("Content", "<url>%s</url>" % plate) if plate else ("Content", "<null></null>"),
+            "ImageColor3": ("Color3", (255, 255, 255)),
+            "ImageTransparency": 1.0,   # as shipped: the plate is there, the body shows
+            "ScaleType": 0,
             "Visible": True,
-            "ZIndex": 2,
+            "ZIndex": 1,
             "Active": True,
             "Selectable": True,
             "AutoButtonColor": True,
             "ClipsDescendants": False,
             "LayoutOrder": 100 + i,
         }
-        props.update(text_overrides(menu["label"], size=14, x_align=2, truncate=0))
-        children = (ui_corner(b, 8, depth=D + 1)
-                    + ui_stroke(b, menu["color"], 2, 0, depth=D + 1)
-                    + text_size(b, 18, 8, depth=D + 1))
-        out.append(b.item("TextButton", menu["name"], props, children=children, depth=D)[0])
+
+        icon_props = {
+            "Position": ("UDim2", (icon_inset, 0, icon_inset, 0)),
+            "Size": ("UDim2", (icon_size, 0, icon_size, 0)),
+            "BackgroundTransparency": 1.0,
+            "BorderSizePixel": 0,
+            "Image": ("Content", "<url>%s</url>" % menu["icon"]),
+            "ImageColor3": ("Color3", (255, 255, 255)),
+            "ImageTransparency": 0.0,
+            "ScaleType": 0,
+            "Visible": True,
+            "ZIndex": 1,
+            "LayoutOrder": 0,
+        }
+
+        cap_props = {
+            "Position": ("UDim2", (cap_x, 0, cap_y, 0)),
+            "Size": ("UDim2", (cap_w, 0, cap_h, 0)),
+            "BackgroundTransparency": 1.0,
+            "BorderSizePixel": 0,
+            "Visible": True,
+            "ZIndex": 1,
+            "LayoutOrder": 0,
+        }
+        cap_props.update(text_overrides(menu["label"], size=14, scaled=True, x_align=2,
+                                        wrapped=True, truncate=0, color=(255, 255, 255),
+                                        font=F["main"]))
+
+        children = (
+            ui_corner(b, corner, depth=D + 1)
+            + ui_stroke(b, stroke_rgb, stroke_w, 0, depth=D + 1)
+            + b.item("ImageLabel", "ImageLabel", icon_props, depth=D + 1)[0]
+            + b.item("TextLabel", "TextLabel", cap_props,
+                     children=(ui_stroke(b, stroke_rgb, 3, 0, depth=D + 2)
+                               + text_size(b, ui.get("captionMaxText", 23), 1, depth=D + 2)),
+                     depth=D + 1)[0]
+            + ui_aspect(b, ui.get("buttonAspect", 0.995738626), depth=D + 1)
+        )
+        out.append(b.item("ImageButton", menu["name"], props, children=children, depth=D)[0])
     return "".join(out)
 
 
@@ -300,12 +383,20 @@ def menu_buttons(b, gd):
 # ---------------------------------------------------------------------------
 
 def row_template(b, ui, depth=D + 2):
-    """The row every menu clones. Visible = false: it is a template, not content."""
+    """The row every menu clones, in the shipped list style.
+
+    Frames/Rewards/Rewards/Reward1 is the model: a cyan block, black outline,
+    chunky FredokaOne text with its own outline. Visible = false - it is a
+    template, not content. MenuUi.addRow clones it and only ever touches Info,
+    Subtitle, Bar/Fill and the row's own UIStroke, so those names are a contract.
+    """
+    F = fonts(ui)
+    stroke = ui.get("rowStroke", [0, 0, 0])
     props = {
         "Position": ("UDim2", (0, 0, 0, 0)),
-        "Size": ("UDim2", (1, -10, 0, int(ui["rowHeight"]))),
+        "Size": ("UDim2", (1, -14, 0, int(ui["rowHeight"]))),
         "BackgroundColor3": ("Color3", tuple(ui["rowColor"])),
-        "BackgroundTransparency": 0.1,
+        "BackgroundTransparency": 0.0,
         "BorderSizePixel": 0,
         "Visible": False,
         "ZIndex": 2,
@@ -313,59 +404,73 @@ def row_template(b, ui, depth=D + 2):
         "LayoutOrder": 0,
         "ClipsDescendants": False,
     }
-    props.update(text_overrides("Row", size=17, x_align=0, truncate=1))
+    props.update(text_overrides("", size=17, x_align=0, truncate=1, font=F["alt"]))
 
     info_props = {
+        "AnchorPoint": ("Vector2", (0, 0.5)),
         "BackgroundTransparency": 1.0,
-        "Position": ("UDim2", (0.55, -12, 0, 0)),
-        "Size": ("UDim2", (0.45, 0, 1, 0)),
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0.03, 0, 0.47, 0)),
+        "Size": ("UDim2", (0.56, 0, 0.6, 0)),
         "Visible": True,
         "ZIndex": 3,
+        "LayoutOrder": 0,
     }
-    info_props.update(text_overrides("", size=15, x_align=2, color=(170, 200, 255)))
+    info_props.update(text_overrides("", size=18, scaled=True, x_align=0, truncate=1,
+                                     color=tuple(ui["rowText"]), font=F["alt"]))
 
     sub_props = {
+        "AnchorPoint": ("Vector2", (0, 0.5)),
         "BackgroundTransparency": 1.0,
-        "Position": ("UDim2", (0, 12, 1, -26)),
-        "Size": ("UDim2", (1, -24, 0, 18)),
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0.6, 0, 0.47, 0)),
+        "Size": ("UDim2", (0.37, 0, 0.5, 0)),
         "Visible": True,
         "ZIndex": 3,
+        "LayoutOrder": 0,
     }
-    sub_props.update(text_overrides("", size=13, x_align=0, color=(150, 160, 185)))
+    sub_props.update(text_overrides("", size=15, scaled=True, x_align=2, truncate=1,
+                                    color=tuple(ui["subText"]), font=F["alt"]))
 
-    # Optional progress bar, hidden by default: Quests shows it, the other menus
-    # leave it alone. Living in the shared template means it costs nothing and any
-    # menu can use it later.
+    # Optional progress bar, shipped hidden inside the template: Quests shows it,
+    # the other menus leave it alone.
     bar_props = {
-        "BackgroundColor3": ("Color3", (16, 18, 26)),
-        "BackgroundTransparency": 0.15,
+        "AnchorPoint": ("Vector2", (0.5, 1)),
+        "BackgroundColor3": ("Color3", tuple(ui["barTrack"])),
+        "BackgroundTransparency": 0.0,
         "BorderSizePixel": 0,
-        "Position": ("UDim2", (0, 12, 1, -8)),
-        "Size": ("UDim2", (1, -24, 0, 6)),
+        "Position": ("UDim2", (0.5, 0, 1, -5)),
+        "Size": ("UDim2", (0.94, 0, 0.11, 0)),
         "Visible": False,
         "ZIndex": 3,
         "ClipsDescendants": True,
+        "LayoutOrder": 0,
     }
     fill_props = {
-        "BackgroundColor3": ("Color3", tuple(ui["accent"])),
+        "BackgroundColor3": ("Color3", tuple(ui["barFill"])),
         "BackgroundTransparency": 0.0,
         "BorderSizePixel": 0,
         "Position": ("UDim2", (0, 0, 0, 0)),
         "Size": ("UDim2", (0, 0, 1, 0)),
         "Visible": True,
         "ZIndex": 4,
+        "LayoutOrder": 0,
     }
 
     children = (
-        ui_corner(b, 8, depth=depth + 1)
-        + ui_stroke(b, ui["accent"], 1.5, 0.4, depth=depth + 1)
-        + ui_padding(b, 12, 12, 0, 0, depth=depth + 1)
-        + b.item("TextLabel", "Info", info_props, depth=depth + 1)[0]
-        + b.item("TextLabel", "Subtitle", sub_props, depth=depth + 1)[0]
+        ui_corner(b, ui.get("rowCorner", 8), depth=depth + 1)
+        + ui_stroke(b, stroke, ui.get("rowStrokeWidth", 3), 0, depth=depth + 1)
+        + b.item("TextLabel", "Info", info_props,
+                 children=ui_stroke(b, stroke, 2.5, 0, depth=depth + 2),
+                 depth=depth + 1)[0]
+        + b.item("TextLabel", "Subtitle", sub_props,
+                 children=ui_stroke(b, stroke, 2.5, 0, depth=depth + 2),
+                 depth=depth + 1)[0]
         + b.item("Frame", "Bar", bar_props,
-                 children=(ui_corner(b, 3, "BarCorner", depth=depth + 2)
+                 children=(ui_corner(b, 4, "BarCorner", depth=depth + 2)
+                           + ui_stroke(b, stroke, 2, 0, depth=depth + 2)
                            + b.item("Frame", "Fill", fill_props,
-                                    children=ui_corner(b, 3, depth=depth + 3),
+                                    children=ui_corner(b, 4, depth=depth + 3),
                                     depth=depth + 2)[0]),
                  depth=depth + 1)[0]
     )
@@ -373,24 +478,39 @@ def row_template(b, ui, depth=D + 2):
 
 
 def section_template(b, ui, depth=D + 2):
+    """A purple banner between groups of rows - the game's own accent colour."""
+    F = fonts(ui)
     props = {
-        "Size": ("UDim2", (1, -10, 0, 30)),
-        "BackgroundColor3": ("Color3", tuple(ui["titleColor"])),
-        "BackgroundTransparency": 0.25,
+        "Position": ("UDim2", (0, 0, 0, 0)),
+        "Size": ("UDim2", (1, -14, 0, 34)),
+        "BackgroundColor3": ("Color3", tuple(ui["sectionColor"])),
+        "BackgroundTransparency": 0.0,
         "BorderSizePixel": 0,
         "Visible": False,
         "ZIndex": 2,
         "LayoutOrder": 0,
+        "ClipsDescendants": False,
     }
-    props.update(text_overrides("Section", size=16, x_align=0, color=(200, 210, 235)))
-    children = (ui_corner(b, 8, depth=depth + 1)
-                + ui_padding(b, 12, 12, 0, 0, depth=depth + 1))
+    props.update(text_overrides("Section", size=17, scaled=True, x_align=2,
+                                color=tuple(ui["sectionText"]), font=F["main"]))
+    children = (ui_corner(b, ui.get("rowCorner", 8), depth=depth + 1)
+                + ui_stroke(b, ui.get("rowStroke", [0, 0, 0]), 3, 0, depth=depth + 1)
+                + text_size(b, 24, 10, depth=depth + 1))
     return b.item("TextLabel", "SectionTemplate", props, children=children, depth=depth)[0]
 
 
 def menu_frames(b, gd):
+    """One panel per menu, styled like Frames/UpdateLog and Frames/Codes.
+
+    White panel, black outline, the title straddling the top edge in the game's
+    purple, a transparent scrolling list of cyan rows. Child names (Title, List,
+    RowTemplate, SectionTemplate, Close, and Status/ClaimAll/CommandBar where the
+    menu asks for them) are the contract MenuUi and the menu modules code against.
+    """
     ui = gd["ui"]
+    F = fonts(ui)
     fw, fh = ui["frameSize"]
+    stroke = ui.get("panelStroke", [0, 0, 0])
     out = []
     for menu in gd["menus"]:
         name = menu["name"]
@@ -399,160 +519,192 @@ def menu_frames(b, gd):
         has_bar = bool(menu.get("commandBar"))
         has_claim_all = bool(menu.get("claimAll"))
 
-        list_top = 0.245 if has_status else 0.14
-        if has_bar:
-            list_top = 0.245
-        list_h = round(0.96 - list_top, 3)
+        list_top = 0.2 if (has_status or has_bar) else 0.1
+        list_h = round(0.97 - list_top, 3)
 
         frame_props = {
             "AnchorPoint": ("Vector2", (0.5, 0.5)),
             "Position": ("UDim2", (0.5, 0, 0.5, 0)),
             "Size": ("UDim2", (fw, 0, fh, 0)),
             "BackgroundColor3": ("Color3", tuple(ui["panelColor"])),
-            "BackgroundTransparency": 0.02,
+            "BackgroundTransparency": 0.0,
             "BorderSizePixel": 0,
             "Visible": False,
             "ZIndex": 1,
             "ClipsDescendants": False,
             "Active": False,
             "Selectable": False,
+            "LayoutOrder": 0,
         }
 
+        tw, th = ui.get("titleSize", [0.4, 0.115])
         title_props = {
-            "Position": ("UDim2", (0.03, 0, 0.02, 0)),
-            "Size": ("UDim2", (0.94, 0, 0.1, 0)),
-            "BackgroundColor3": ("Color3", tuple(ui["titleColor"])),
-            "BackgroundTransparency": 0.15,
+            "AnchorPoint": ("Vector2", (0.5, 0.5)),
+            "Position": ("UDim2", (0.5, 0, 0, 0)),
+            "Size": ("UDim2", (tw, 0, th, 0)),
+            "BackgroundTransparency": 1.0,
             "BorderSizePixel": 0,
             "Visible": True,
-            "ZIndex": 3,
+            "ZIndex": 4,
+            "LayoutOrder": 0,
         }
-        title_props.update(text_overrides(name, size=26, scaled=True, x_align=2))
+        title_props.update(text_overrides(name, size=26, scaled=True, x_align=2,
+                                          color=tuple(ui["titleColor"]), font=F["main"]))
 
         list_props = {
-            "Position": ("UDim2", (0.03, 0, list_top, 0)),
+            "AnchorPoint": ("Vector2", (0.5, 0)),
+            "Position": ("UDim2", (0.5, 0, list_top, 0)),
             "Size": ("UDim2", (0.94, 0, list_h, 0)),
             "BackgroundColor3": ("Color3", tuple(ui["listColor"])),
-            "BackgroundTransparency": 0.35,
+            "BackgroundTransparency": 1.0,
             "BorderSizePixel": 0,
             "ClipsDescendants": True,
             "Visible": True,
-            "ZIndex": 1,
+            "ZIndex": 2,
             "AutomaticCanvasSize": 2,
             "CanvasSize": ("UDim2", (0, 0, 0, 0)),
             "ScrollingDirection": 2,
             "ScrollingEnabled": True,
-            "ScrollBarThickness": 8,
+            "ScrollBarThickness": int(ui.get("scrollBarThickness", 11)),
             "ScrollBarImageColor3": ("Color3", tuple(accent)),
             "ScrollBarImageTransparency": 0.0,
             "VerticalScrollBarInset": 1,
             "Active": True,
             "Selectable": True,
+            "LayoutOrder": 0,
         }
 
         close_props = {
-            "Position": ("UDim2", (1, -34, 0, 4)),
-            "Size": ("UDim2", (0, 30, 0, 30)),
-            "BackgroundColor3": ("Color3", (190, 60, 60)),
+            "AnchorPoint": ("Vector2", (1, 0)),
+            "Position": ("UDim2", (1, -8, 0, 8)),
+            "Size": ("UDim2", (0, 34, 0, 34)),
+            "BackgroundColor3": ("Color3", tuple(ui["closeColor"])),
             "BackgroundTransparency": 0.0,
             "BorderSizePixel": 0,
             "Visible": True,
-            "ZIndex": 4,
+            "ZIndex": 5,
             "AutoButtonColor": True,
+            "LayoutOrder": 0,
         }
-        close_props.update(text_overrides("X", size=20, scaled=True, x_align=2, wrapped=False))
+        close_props.update(text_overrides("X", size=20, scaled=True, x_align=2,
+                                          color=(255, 255, 255), font=F["main"]))
 
         children = (
-            ui_corner(b, 14, depth=D + 1)
-            + ui_stroke(b, accent, 2, 0, depth=D + 1)
+            ui_corner(b, ui.get("panelCorner", 0.025), scale=True, depth=D + 1)
+            + ui_stroke(b, stroke, ui.get("panelStrokeWidth", 4.5), 0, depth=D + 1)
+            # Shipped panels keep their shape on any screen with an aspect
+            # constraint; at the design size it is a no-op (fw / fh), and on a
+            # narrow screen it stops the panel squashing its rows.
+            + ui_aspect(b, round(float(fw) / float(fh), 6), depth=D + 1)
             + b.item("TextLabel", "Title", title_props,
-                     children=text_size(b, 30, 12, depth=D + 2), depth=D + 1)[0]
+                     children=(ui_stroke(b, stroke, ui.get("titleStrokeWidth", 3), 0, depth=D + 2)
+                               + text_size(b, 40, 12, depth=D + 2)),
+                     depth=D + 1)[0]
         )
 
         if has_status:
             # A claim-all button shares this line, so the status text gives way.
-            status_width = 0.66 if has_claim_all else 0.94
             status_props = {
-                "Position": ("UDim2", (0.03, 0, 0.135, 0)),
-                "Size": ("UDim2", (status_width, 0, 0.085, 0)),
-                "BackgroundColor3": ("Color3", (18, 20, 30)),
-                "BackgroundTransparency": 0.35,
+                "Position": ("UDim2", (0.03, 0, 0.1, 0)),
+                "Size": ("UDim2", (0.6 if has_claim_all else 0.94, 0, 0.08, 0)),
+                "BackgroundTransparency": 1.0,
                 "BorderSizePixel": 0,
                 "Visible": True,
-                "ZIndex": 2,
+                "ZIndex": 3,
+                "LayoutOrder": 0,
             }
-            status_props.update(text_overrides("", size=18, scaled=True, x_align=2,
-                                               color=(255, 220, 120)))
+            status_props.update(text_overrides("", size=18, scaled=True,
+                                               x_align=0 if has_claim_all else 2,
+                                               color=tuple(ui["subText"]), font=F["alt"]))
             children += b.item("TextLabel", "Status", status_props,
-                               children=text_size(b, 20, 10, depth=D + 2), depth=D + 1)[0]
+                               children=(ui_stroke(b, stroke, 3, 0, depth=D + 2)
+                                         + text_size(b, 26, 10, depth=D + 2)),
+                               depth=D + 1)[0]
 
         if has_claim_all:
             claim_props = {
-                "Position": ("UDim2", (0.71, 0, 0.135, 0)),
-                "Size": ("UDim2", (0.26, 0, 0.085, 0)),
-                "BackgroundColor3": ("Color3", tuple(accent)),
+                "Position": ("UDim2", (0.66, 0, 0.095, 0)),
+                "Size": ("UDim2", (0.31, 0, 0.085, 0)),
+                "BackgroundColor3": ("Color3", tuple(ui["actionColor"])),
                 "BackgroundTransparency": 0.0,
                 "BorderSizePixel": 0,
                 "Visible": True,
                 "ZIndex": 4,
                 "AutoButtonColor": True,
+                "LayoutOrder": 0,
             }
-            claim_props.update(text_overrides("Claim All", size=16, scaled=True, x_align=2))
+            claim_props.update(text_overrides("Claim All", size=16, scaled=True, x_align=2,
+                                              color=(255, 255, 255), font=F["main"]))
             children += b.item("TextButton", "ClaimAll", claim_props,
                                children=(ui_corner(b, 8, depth=D + 2)
-                                         + text_size(b, 18, 9, depth=D + 2)),
+                                         + ui_stroke(b, stroke, 3, 0, depth=D + 2)
+                                         + text_size(b, 22, 9, depth=D + 2)),
                                depth=D + 1)[0]
 
         if has_bar:
             bar_props = {
-                "Position": ("UDim2", (0.03, 0, 0.14, 0)),
+                "Position": ("UDim2", (0.03, 0, 0.1, 0)),
                 "Size": ("UDim2", (0.94, 0, 0.085, 0)),
-                "BackgroundColor3": ("Color3", (18, 20, 30)),
-                "BackgroundTransparency": 0.15,
+                "BackgroundColor3": ("Color3", tuple(ui["inputColor"])),
+                "BackgroundTransparency": 0.0,
                 "BorderSizePixel": 0,
                 "Visible": True,
                 "ZIndex": 5,
+                "LayoutOrder": 0,
+                "ClipsDescendants": False,
             }
             box_props = {
                 "BackgroundTransparency": 1.0,
-                "Position": ("UDim2", (0, 10, 0, 0)),
-                "Size": ("UDim2", (1, -100, 1, 0)),
+                "BorderSizePixel": 0,
+                "Position": ("UDim2", (0, 12, 0, 0)),
+                "Size": ("UDim2", (1, -112, 1, 0)),
                 "Visible": True,
                 "ZIndex": 6,
                 "ClearTextOnFocus": False,
                 "PlaceholderText": "type a command, then Enter",
-                "PlaceholderColor3": ("Color3", (120, 128, 150)),
+                "PlaceholderColor3": ("Color3", (90, 90, 90)),
                 "TextEditable": True,
+                "LayoutOrder": 0,
             }
-            box_props.update(text_overrides("", size=15, x_align=0))
+            box_props.update(text_overrides("", size=15, scaled=True, x_align=0,
+                                            color=tuple(ui["inputText"]), font=F["main"]))
             send_props = {
-                "Position": ("UDim2", (1, -84, 0.12, 0)),
-                "Size": ("UDim2", (0, 74, 0.76, 0)),
-                "BackgroundColor3": ("Color3", tuple(accent)),
+                "Position": ("UDim2", (1, -92, 0.1, 0)),
+                "Size": ("UDim2", (0, 82, 0.8, 0)),
+                "BackgroundColor3": ("Color3", tuple(ui["actionColor"])),
                 "BackgroundTransparency": 0.0,
                 "BorderSizePixel": 0,
                 "Visible": True,
                 "ZIndex": 6,
                 "AutoButtonColor": True,
+                "LayoutOrder": 0,
             }
-            send_props.update(text_overrides("Run", size=15, scaled=True, x_align=2))
+            send_props.update(text_overrides("Run", size=15, scaled=True, x_align=2,
+                                             color=(255, 255, 255), font=F["main"]))
             children += b.item("Frame", "CommandBar", bar_props,
                                children=(ui_corner(b, 8, depth=D + 2)
-                                         + b.item("TextBox", "Input", box_props, depth=D + 2)[0]
+                                         + ui_stroke(b, stroke, 3, 0, depth=D + 2)
+                                         + b.item("TextBox", "Input", box_props,
+                                                  children=text_size(b, 22, 9, depth=D + 3),
+                                                  depth=D + 2)[0]
                                          + b.item("TextButton", "Send", send_props,
-                                                  children=ui_corner(b, 6, depth=D + 3),
+                                                  children=(ui_corner(b, 8, depth=D + 3)
+                                                            + ui_stroke(b, stroke, 2.5, 0, depth=D + 3)
+                                                            + text_size(b, 20, 9, depth=D + 3)),
                                                   depth=D + 2)[0]),
                                depth=D + 1)[0]
 
         children += b.item("ScrollingFrame", "List", list_props,
-                           children=(ui_list_layout(b, 6, 2, 0, 0, depth=D + 2)
+                           children=(ui_padding(b, 0, 0, 4, 4, depth=D + 2)
+                                     + ui_list_layout(b, 8, 2, 1, 0, depth=D + 2)
                                      + row_template(b, ui, D + 2)
                                      + section_template(b, ui, D + 2)),
                            depth=D + 1)[0]
 
         children += b.item("TextButton", "Close", close_props,
                            children=(ui_corner(b, 8, depth=D + 2)
-                                     + text_size(b, 22, 10, depth=D + 2)),
+                                     + ui_stroke(b, stroke, 3, 0, depth=D + 2)
+                                     + text_size(b, 24, 10, depth=D + 2)),
                            depth=D + 1)[0]
 
         out.append(b.item("Frame", name, frame_props, children=children, depth=D)[0])
@@ -564,42 +716,50 @@ def menu_frames(b, gd):
 # ---------------------------------------------------------------------------
 
 def killfeed(b, gd):
-    """StarterGui/KillFeed: top-centre strip that reports who ate whom.
+    """StarterGui/KillFeed: strip under the menu row that reports who ate whom.
 
-    Top centre is the one region of the screen neither Roblox core UI (chat
-    top-left, player list top-right) nor this game's HUD uses.
+    Purple like the rest of the game's chrome, black outline, FredokaOne text -
+    the shipped HUD's own vocabulary rather than a new one.
     """
     ui = gd["ui"]
+    F = fonts(ui)
+    spec = ui.get("killFeed") or {}
+    stroke = ui.get("panelStroke", [0, 0, 0])
+
     entry_props = {
-        "BackgroundColor3": ("Color3", (16, 18, 26)),
-        "BackgroundTransparency": 0.2,
+        "BackgroundColor3": ("Color3", tuple(spec.get("color", [170, 85, 255]))),
+        "BackgroundTransparency": float(spec.get("transparency", 0.15)),
         "BorderSizePixel": 0,
-        "Size": ("UDim2", (1, 0, 0, 26)),
+        "Size": ("UDim2", (1, 0, 0, int(spec.get("entryHeight", 28)))),
         "Visible": False,          # template
         "ZIndex": 2,
         "LayoutOrder": 0,
         "ClipsDescendants": False,
     }
-    entry_props.update(text_overrides("", size=15, x_align=0, color=(235, 240, 255)))
+    entry_props.update(text_overrides("", size=15, scaled=True, x_align=0,
+                                      color=tuple(spec.get("text", [255, 255, 255])),
+                                      font=F["alt"]))
 
     entries_props = {
         "AnchorPoint": ("Vector2", (0.5, 0)),
         "BackgroundColor3": ("Color3", (0, 0, 0)),
         "BackgroundTransparency": 1.0,
         "BorderSizePixel": 0,
-        "Position": ("UDim2", (0.5, 0, 0.06, 0)),
-        "Size": ("UDim2", (0, 420, 0, 160)),
+        "Position": ("UDim2", (0.5, 0, float(spec.get("y", 0.17)), 0)),
+        "Size": ("UDim2", (0, int(spec.get("width", 430)), 0, int(spec.get("height", 168)))),
         "Visible": True,
         "ZIndex": 1,
         "ClipsDescendants": False,
+        "LayoutOrder": 0,
     }
 
     entries = b.item("Frame", "Entries", entries_props,
-                     children=(ui_list_layout(b, 4, 2, 0, 0, depth=D + 2)
+                     children=(ui_list_layout(b, 5, 2, 1, 0, depth=D + 2)
                                + b.item("TextLabel", "Entry", entry_props,
-                                        children=(ui_corner(b, 6, depth=D + 3)
-                                                  + ui_padding(b, 10, 10, 0, 0, depth=D + 3)
-                                                  + text_size(b, 17, 9, depth=D + 3)),
+                                        children=(ui_corner(b, 8, depth=D + 3)
+                                                  + ui_stroke(b, stroke, 3, 0, depth=D + 3)
+                                                  + ui_padding(b, 12, 12, 0, 0, depth=D + 3)
+                                                  + text_size(b, 20, 9, depth=D + 3)),
                                         depth=D + 2)[0]),
                      depth=D + 1)[0]
 
@@ -617,19 +777,28 @@ def zonewarn(b, gd):
     """StarterGui/ZoneWarn: red edge + reason when standing in a locked zone.
 
     The server already refuses the food and the teleport; this is the part that
-    stops the gate feeling arbitrary.
+    stops the gate feeling arbitrary. Gold FredokaOne text with a black outline,
+    which is how the shipped UI writes warnings.
     """
+    ui = gd["ui"]
+    F = fonts(ui)
+    spec = ui.get("zoneWarn") or {}
+    stroke = ui.get("panelStroke", [0, 0, 0])
+
     label_props = {
         "AnchorPoint": ("Vector2", (0.5, 0)),
-        "BackgroundColor3": ("Color3", (16, 18, 26)),
-        "BackgroundTransparency": 0.15,
+        "BackgroundTransparency": 1.0,
         "BorderSizePixel": 0,
-        "Position": ("UDim2", (0.5, 0, 0.24, 0)),
-        "Size": ("UDim2", (0, 460, 0, 44)),
+        "Position": ("UDim2", (0.5, 0, float(spec.get("y", 0.34)), 0)),
+        "Size": ("UDim2", (0, int(spec.get("width", 470)), 0, int(spec.get("height", 46)))),
         "Visible": True,
         "ZIndex": 3,
+        "LayoutOrder": 0,
+        "ClipsDescendants": False,
     }
-    label_props.update(text_overrides("", size=19, scaled=True, x_align=2, color=(255, 170, 150)))
+    label_props.update(text_overrides("", size=19, scaled=True, x_align=2,
+                                      color=tuple(spec.get("text", [249, 173, 0])),
+                                      font=F["alt"]))
 
     tint_props = {
         "BackgroundColor3": ("Color3", (0, 0, 0)),
@@ -640,20 +809,21 @@ def zonewarn(b, gd):
         "Visible": False,
         "ZIndex": 2,
         "ClipsDescendants": False,
+        "LayoutOrder": 0,
     }
 
     tint = b.item("Frame", "Tint", tint_props,
                   children=(b.item("UIStroke", "UIStroke", {
                                       "ApplyStrokeMode": 0,     # Border
-                                      "Color": ("Color3", (235, 70, 70)),
+                                      "Color": ("Color3", tuple(spec.get("edge", [235, 70, 70]))),
                                       "Thickness": 16.0,
                                       "Transparency": 0.35,
                                       "Enabled": True,
                                       "LineJoinMode": 2,
                                   }, depth=D + 2)[0]
                             + b.item("TextLabel", "Label", label_props,
-                                     children=(ui_corner(b, 10, depth=D + 3)
-                                               + text_size(b, 22, 10, depth=D + 3)),
+                                     children=(ui_stroke(b, stroke, 4, 0, depth=D + 3)
+                                               + text_size(b, 26, 10, depth=D + 3)),
                                      depth=D + 2)[0]),
                   depth=D + 1)[0]
 
@@ -672,12 +842,16 @@ def zonewarn(b, gd):
 # ---------------------------------------------------------------------------
 
 def notifier(b, gd):
+    """Toast stack. White card, black outline, kind colour as the accent stroke -
+    the same recipe as the shipped panels, so a toast reads as part of the game."""
     ui = gd["ui"]
+    F = fonts(ui)
     kinds = gd["notifier"]["kinds"]
+    stroke = ui.get("panelStroke", [0, 0, 0])
 
     toast_props = {
-        "Size": ("UDim2", (1, 0, 0, 34)),
-        "BackgroundColor3": ("Color3", (18, 20, 30)),
+        "Size": ("UDim2", (1, 0, 0, 36)),
+        "BackgroundColor3": ("Color3", tuple(ui["panelColor"])),
         "BackgroundTransparency": 0.05,
         "BorderSizePixel": 0,
         "Visible": False,
@@ -685,17 +859,21 @@ def notifier(b, gd):
         "LayoutOrder": 0,
         "ClipsDescendants": False,
     }
-    toast_props.update(text_overrides("", size=16, scaled=True, x_align=2, wrapped=True))
+    toast_props.update(text_overrides("", size=16, scaled=True, x_align=2, wrapped=True,
+                                      color=tuple(ui.get("inputText", [60, 60, 60])),
+                                      font=F["main"]))
 
     container_props = {
         "AnchorPoint": ("Vector2", (0.5, 1)),
         "Position": ("UDim2", (0.5, 0, 0.72, 0)),
         "Size": ("UDim2", (0, 420, 0, 220)),
+        "BackgroundColor3": ("Color3", (255, 255, 255)),
         "BackgroundTransparency": 1.0,
         "BorderSizePixel": 0,
         "Visible": True,
         "ZIndex": 5,
         "ClipsDescendants": False,
+        "LayoutOrder": 0,
     }
 
     gui_props = {
@@ -710,9 +888,9 @@ def notifier(b, gd):
         ui_list_layout(b, 6, 2, 1, 2, depth=D + 2)      # LayoutOrder, centred, bottom aligned
         + b.item("TextLabel", "Toast", toast_props,
                  children=(ui_corner(b, 8, depth=D + 3)
-                           + ui_stroke(b, kinds["info"], 1.5, 0.3, depth=D + 3)
+                           + ui_stroke(b, kinds["info"], 3, 0, depth=D + 3)
                            + ui_padding(b, 14, 14, 0, 0, depth=D + 3)
-                           + text_size(b, 20, 10, depth=D + 3)),
+                           + text_size(b, 22, 10, depth=D + 3)),
                  depth=D + 2)[0]
     )
     toasts = b.item("Frame", "Toasts", container_props, children=children, depth=D + 1)[0]
