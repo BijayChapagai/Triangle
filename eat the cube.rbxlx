@@ -15769,6 +15769,7 @@ local function bootUi()
 	-- Last: it animates food cubes, which only exist once the server has seeded
 	-- them, and it needs nothing from the modules above except the motion pref.
 	run("FoodFx", function(m) m.Init(Client) end)
+	run("Tags", function(m) m.Init(Client) end)
 end
 
 -- Preload the map while the loading screen is up, then hand over to the game.
@@ -17223,7 +17224,7 @@ end)
 					</Properties>
 				</Item>
 			</Item>
-				<Item class="Folder" referent="RBX29dd9d2253457b6223e6f299b3a94cdc">
+				<Item class="Folder" referent="RBXeab691b9d212ec6194c8739fdd25a725">
 					<Properties>
 <Color3 name="IconTint">
 					<R>0</R>
@@ -17237,7 +17238,7 @@ end)
 					<string name="Name">ClientModules</string>
 					<int64 name="SourceAssetId">-1</int64>
 					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-					<UniqueId name="UniqueId">RBX29dd9d2253457b6223e6f299b3a94cdc</UniqueId>
+					<UniqueId name="UniqueId">RBXeab691b9d212ec6194c8739fdd25a725</UniqueId>
 					</Properties>
 <Item class="ModuleScript" referent="RBXE84C889525BD4CB585127DC63071ABC8">
 				<Properties>
@@ -19948,7 +19949,182 @@ return FoodFx
 						<string name="ScriptGuid">{42030805-D5E9-49C5-808B-6996233341FC}</string>
 						</Properties>
 					</Item>
-					<Item class="Folder" referent="RBX19bd58f1bcaa15ec2b07a9c68528ae5a">
+					<Item class="ModuleScript" referent="RBX6187dfd84f2be4db4b3517131d0696be">
+						<Properties>
+						<ProtectedString name="Source"><![CDATA[-- Name tags and zone signs: constant size, soft edges.
+--
+-- Both are pixel-sized BillboardGuis, so they hold their size on screen however
+-- far away you are (a billboard sized in scale units is world-sized, which is how
+-- the name tags used to shrink to nothing across an arena). What they did NOT
+-- have was an edge: Roblox cuts a billboard off dead at MaxDistance, so a tag
+-- vanished between two frames and read as a glitch.
+--
+-- This module dissolves each billboard over the last quarter of its range and
+-- fades it up when it first appears, so the cutoff is a fade. It only ever writes
+-- transparency: the TEXT a tag shows belongs to the server, and its SIZE belongs
+-- to the asset in Studio.
+local Tags = {}
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local FADE_SPAN = 0.25      -- fraction of MaxDistance spent dissolving at the edge
+local POP_IN = 0.35         -- seconds for a freshly spawned tag to fade up
+local DEFAULT_RANGE = 600   -- only used if a billboard has no MaxDistance at all
+
+local camera
+local reducedMotion = false
+local watched = {}          -- billboard -> record
+local characters = {}       -- character -> true, so a respawn is picked up once
+
+local function watch(billboard)
+	local record = {
+		labels = {},
+		range = billboard.MaxDistance > 0 and billboard.MaxDistance or DEFAULT_RANGE,
+		born = os.clock(),
+		factor = -1,        -- forces a write on the first sweep
+	}
+
+	for _, child in ipairs(billboard:GetDescendants()) do
+		if child:IsA("TextLabel") then
+			table.insert(record.labels, {
+				object = child,
+				kind = "text",
+				base = child.TextTransparency,
+				background = child.BackgroundTransparency,
+			})
+		elseif child:IsA("ImageLabel") then
+			table.insert(record.labels, {
+				object = child,
+				kind = "image",
+				base = child.ImageTransparency,
+				background = child.BackgroundTransparency,
+			})
+		end
+	end
+
+	watched[billboard] = record
+	return record
+end
+
+local function apply(record, factor)
+	if factor == record.factor then return end
+	record.factor = factor
+
+	local hidden = 1 - factor
+	for _, label in ipairs(record.labels) do
+		local object = label.object
+		if object.Parent == nil then continue end
+		if label.kind == "text" then
+			object.TextTransparency = label.base + (1 - label.base) * hidden
+		else
+			object.ImageTransparency = label.base + (1 - label.base) * hidden
+		end
+		object.BackgroundTransparency = label.background + (1 - label.background) * hidden
+	end
+end
+
+-- 1 while the billboard is in comfortable range, 0 once it is past MaxDistance,
+-- and a ramp in between instead of a cliff.
+local function rangeFactor(record, distance)
+	if distance >= record.range then return 0 end
+	local fadeStart = record.range * (1 - FADE_SPAN)
+	if distance <= fadeStart then return 1 end
+	return 1 - (distance - fadeStart) / (record.range - fadeStart)
+end
+
+local function collect()
+	-- Player tags ride on the character the server hands out; a respawn is a new
+	-- character, so the old record is dropped when its billboard loses its parent.
+	for _, player in ipairs(Players:GetPlayers()) do
+		local character = player.Character
+		if character and not characters[character] then
+			characters[character] = true
+			local billboard = character:FindFirstChild("PlayerDisplay", true)
+			if billboard and billboard:IsA("BillboardGui") and not watched[billboard] then
+				watch(billboard)
+			end
+		end
+	end
+
+	-- Zone signs are map geometry: one per arena, under its floor slab.
+	local zones = workspace:FindFirstChild("Zones")
+	if zones then
+		for _, zone in ipairs(zones:GetChildren()) do
+			local floor = zone:FindFirstChild("Floor")
+			local sign = floor and floor:FindFirstChild("Sign")
+			if sign and sign:IsA("BillboardGui") and not watched[sign] then
+				watch(sign)
+			end
+		end
+	end
+end
+
+local function sweep()
+	local origin = camera and camera.CFrame.Position
+	if not origin then return end
+
+	collect()
+
+	local now = os.clock()
+	for billboard, record in pairs(watched) do
+		if billboard.Parent == nil then
+			watched[billboard] = nil
+			continue
+		end
+
+		local adornee = billboard.Adornee or billboard.Parent
+		local position = adornee and adornee:IsA("BasePart") and adornee.Position
+		local factor = rangeFactor(record, position and (position - origin).Magnitude or 0)
+
+		if not reducedMotion then
+			factor *= math.clamp((now - record.born) / POP_IN, 0, 1)
+		end
+		apply(record, factor)
+	end
+end
+
+function Tags.Init(client)
+	camera = workspace.CurrentCamera
+	reducedMotion = client.Prefs and client.Prefs.ReducedMotion == true
+	client.onPref("ReducedMotion", function(value)
+		reducedMotion = value == true
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		local character = player.Character
+		if character then characters[character] = nil end
+	end)
+
+	-- Heartbeat: a dissolve at frame rate is smooth and this touches a couple of
+	-- dozen objects, so there is nothing to throttle.
+	local warned = false
+	RunService.Heartbeat:Connect(function()
+		local ok, err = pcall(sweep)
+		if not ok and not warned then
+			warned = true
+			warn("[Tags] stopped fading billboards: " .. tostring(err))
+		end
+	end)
+
+	return true
+end
+
+return Tags
+]]></ProtectedString>
+						<Content name="LinkedSource"><null></null></Content>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">Tags</string>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+						<UniqueId name="UniqueId">RBX6187dfd84f2be4db4b3517131d0696be</UniqueId>
+						<string name="ScriptGuid">{AB76053F-C7AF-42A1-9561-C3CA4C26D2F3}</string>
+						</Properties>
+					</Item>
+					<Item class="Folder" referent="RBX29dd9d2253457b6223e6f299b3a94cdc">
 						<Properties>
 <Color3 name="IconTint">
 					<R>0</R>
@@ -19962,9 +20138,9 @@ return FoodFx
 						<string name="Name">Menus</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX19bd58f1bcaa15ec2b07a9c68528ae5a</UniqueId>
+						<UniqueId name="UniqueId">RBX29dd9d2253457b6223e6f299b3a94cdc</UniqueId>
 						</Properties>
-					<Item class="ModuleScript" referent="RBX6187dfd84f2be4db4b3517131d0696be">
+					<Item class="ModuleScript" referent="RBXf2ea746b125374473de070b1f5178421">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Menu wiring. Every button in StarterGui.Buttons whose name matches a frame in
 -- StarterGui.Frames toggles that frame (the convention the old ButtonEffects
@@ -20229,11 +20405,11 @@ return MenuUi
 						<string name="Name">MenuUi</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX6187dfd84f2be4db4b3517131d0696be</UniqueId>
-						<string name="ScriptGuid">{AB76053F-C7AF-42A1-9561-C3CA4C26D2F3}</string>
+						<UniqueId name="UniqueId">RBXf2ea746b125374473de070b1f5178421</UniqueId>
+						<string name="ScriptGuid">{71AA4AF6-ECD6-48CD-9E45-B26545A31E5A}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBXf2ea746b125374473de070b1f5178421">
+					<Item class="ModuleScript" referent="RBX1fb4171ae024067f1fb006ccaa9b3573">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Tab launchers. The HUD bar carries three tabs - Grow, World, Store - and each
 -- opens a small panel of rows; every row opens one of the real menus. That keeps
@@ -20341,11 +20517,11 @@ return Tabs
 						<string name="Name">Tabs</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBXf2ea746b125374473de070b1f5178421</UniqueId>
-						<string name="ScriptGuid">{71AA4AF6-ECD6-48CD-9E45-B26545A31E5A}</string>
+						<UniqueId name="UniqueId">RBX1fb4171ae024067f1fb006ccaa9b3573</UniqueId>
+						<string name="ScriptGuid">{C7BDCCA5-A585-422D-8DC2-5969FAE0FFC2}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX1fb4171ae024067f1fb006ccaa9b3573">
+					<Item class="ModuleScript" referent="RBX306cdcc20c6a489dcb32f1eddf93dd48">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Rebirth menu. Numbers come from GameData/Settings (RebirthBase, RebirthExponent,
 -- RebirthAdd, RebirthMultStep, RebirthCashPerLevel) so tuning is a Studio edit.
@@ -20472,11 +20648,11 @@ return Rebirth
 						<string name="Name">Rebirth</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX1fb4171ae024067f1fb006ccaa9b3573</UniqueId>
-						<string name="ScriptGuid">{C7BDCCA5-A585-422D-8DC2-5969FAE0FFC2}</string>
+						<UniqueId name="UniqueId">RBX306cdcc20c6a489dcb32f1eddf93dd48</UniqueId>
+						<string name="ScriptGuid">{1C77D958-0861-4F84-A6EB-B039D1AD45FF}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX306cdcc20c6a489dcb32f1eddf93dd48">
+					<Item class="ModuleScript" referent="RBX01ce7b1f1eb291a7a8112eac140a1ddd">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Skins menu. The catalogue is GameData/Skins (Color, Unlock, Req, Order) and
 -- ownership comes from the server through Events.SkinList, so nothing here can
@@ -20632,11 +20808,11 @@ return Skins
 						<string name="Name">Skins</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX306cdcc20c6a489dcb32f1eddf93dd48</UniqueId>
-						<string name="ScriptGuid">{1C77D958-0861-4F84-A6EB-B039D1AD45FF}</string>
+						<UniqueId name="UniqueId">RBX01ce7b1f1eb291a7a8112eac140a1ddd</UniqueId>
+						<string name="ScriptGuid">{6E827C8F-FF7A-4C0F-8273-8DFDF42C43DE}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX01ce7b1f1eb291a7a8112eac140a1ddd">
+					<Item class="ModuleScript" referent="RBX59a09e36aa2acf6fb6b2835b4f2f7b30">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Daily quests. The list is GameData/Quests (Type, Goal, RewardCash,
 -- RewardSkin, Text, Order); progress and claims come from the server through
@@ -20791,11 +20967,11 @@ return Quests
 						<string name="Name">Quests</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX01ce7b1f1eb291a7a8112eac140a1ddd</UniqueId>
-						<string name="ScriptGuid">{6E827C8F-FF7A-4C0F-8273-8DFDF42C43DE}</string>
+						<UniqueId name="UniqueId">RBX59a09e36aa2acf6fb6b2835b4f2f7b30</UniqueId>
+						<string name="ScriptGuid">{7B8641DF-01E3-477F-A01E-6A6200C1D321}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX59a09e36aa2acf6fb6b2835b4f2f7b30">
+					<Item class="ModuleScript" referent="RBXa006ed6dbcec859b354154e230aaf080">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Zones menu. The zones ARE the map: every zone is its own walled arena in
 -- workspace/Zones, carrying its Id, Rarity, ReqSize, ReqRebirth and Color, so
@@ -20988,11 +21164,11 @@ return Zones
 						<string name="Name">Zones</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX59a09e36aa2acf6fb6b2835b4f2f7b30</UniqueId>
-						<string name="ScriptGuid">{7B8641DF-01E3-477F-A01E-6A6200C1D321}</string>
+						<UniqueId name="UniqueId">RBXa006ed6dbcec859b354154e230aaf080</UniqueId>
+						<string name="ScriptGuid">{3FE0B0DE-59B6-4122-9480-03B6ED8427C0}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBXa006ed6dbcec859b354154e230aaf080">
+					<Item class="ModuleScript" referent="RBX006278fb5710900b6069a42b5fa78537">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Global leaderboards. The boards are ordered data stores read on the server and
 -- pushed through Events.Leaderboard; this menu only renders the cache and asks
@@ -21084,11 +21260,11 @@ return Leaderboard
 						<string name="Name">Leaderboard</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBXa006ed6dbcec859b354154e230aaf080</UniqueId>
-						<string name="ScriptGuid">{3FE0B0DE-59B6-4122-9480-03B6ED8427C0}</string>
+						<UniqueId name="UniqueId">RBX006278fb5710900b6069a42b5fa78537</UniqueId>
+						<string name="ScriptGuid">{74E33B47-71E0-4023-85A1-CBD27BFE3B22}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX006278fb5710900b6069a42b5fa78537">
+					<Item class="ModuleScript" referent="RBX015ea339dfa4c1c5a5b83fb11efbd6fa">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Codes menu: Frames/Codes > TextBox (+ the hover/pop Sounds that ship with it).
 -- Codes and their cash values live in GameData/Codes; the server validates and
@@ -21162,11 +21338,11 @@ return Codes
 						<string name="Name">Codes</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX006278fb5710900b6069a42b5fa78537</UniqueId>
-						<string name="ScriptGuid">{74E33B47-71E0-4023-85A1-CBD27BFE3B22}</string>
+						<UniqueId name="UniqueId">RBX015ea339dfa4c1c5a5b83fb11efbd6fa</UniqueId>
+						<string name="ScriptGuid">{E6C26802-E8D3-48FB-9652-C80760BE7010}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX015ea339dfa4c1c5a5b83fb11efbd6fa">
+					<Item class="ModuleScript" referent="RBXdcb32957b94eb3e4a07afdd5472c4bb0">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Shop menu: gamepasses.
 --
@@ -21294,11 +21470,11 @@ return Shop
 						<string name="Name">Shop</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX015ea339dfa4c1c5a5b83fb11efbd6fa</UniqueId>
-						<string name="ScriptGuid">{E6C26802-E8D3-48FB-9652-C80760BE7010}</string>
+						<UniqueId name="UniqueId">RBXdcb32957b94eb3e4a07afdd5472c4bb0</UniqueId>
+						<string name="ScriptGuid">{79A3C10B-A239-47A5-8D35-E4CE2E0225F3}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBXdcb32957b94eb3e4a07afdd5472c4bb0">
+					<Item class="ModuleScript" referent="RBXb2c8fec6147e673f12affc74134422ca">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Playtime rewards menu: Frames/Rewards > Rewards > Reward1..RewardN, each an
 -- ImageButton with Time and Amount labels.
@@ -21453,11 +21629,11 @@ return Rewards
 						<string name="Name">Rewards</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBXdcb32957b94eb3e4a07afdd5472c4bb0</UniqueId>
-						<string name="ScriptGuid">{79A3C10B-A239-47A5-8D35-E4CE2E0225F3}</string>
+						<UniqueId name="UniqueId">RBXb2c8fec6147e673f12affc74134422ca</UniqueId>
+						<string name="ScriptGuid">{479BC8B4-1D5C-4D3A-BB61-6CC47BA81F8A}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBXb2c8fec6147e673f12affc74134422ca">
+					<Item class="ModuleScript" referent="RBX5406f7e24f9ede26d5de04aa2cdda835">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Update log menu: Frames/UpdateLog > ScrollingFrame > template > Main >
 -- {Number, Update}. The entries are GameData/UpdateLog (ordered StringValues), so
@@ -21538,11 +21714,11 @@ return UpdateLog
 						<string name="Name">UpdateLog</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBXb2c8fec6147e673f12affc74134422ca</UniqueId>
-						<string name="ScriptGuid">{479BC8B4-1D5C-4D3A-BB61-6CC47BA81F8A}</string>
+						<UniqueId name="UniqueId">RBX5406f7e24f9ede26d5de04aa2cdda835</UniqueId>
+						<string name="ScriptGuid">{84E5ED85-39AD-4336-B4C5-4293F85675DA}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX5406f7e24f9ede26d5de04aa2cdda835">
+					<Item class="ModuleScript" referent="RBX19bd58f1bcaa15ec2b07a9c68528ae5a">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Settings menu. The list of settings is content (GameData/Prefs), so adding a
 -- value there adds a row here with no code. Values are saved to the profile
@@ -21700,8 +21876,8 @@ return Settings
 						<string name="Name">Settings</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX5406f7e24f9ede26d5de04aa2cdda835</UniqueId>
-						<string name="ScriptGuid">{84E5ED85-39AD-4336-B4C5-4293F85675DA}</string>
+						<UniqueId name="UniqueId">RBX19bd58f1bcaa15ec2b07a9c68528ae5a</UniqueId>
+						<string name="ScriptGuid">{82F08707-EFF8-49FC-AAAB-98CDACE98652}</string>
 						</Properties>
 					</Item>
 					</Item>

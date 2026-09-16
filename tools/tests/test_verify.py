@@ -273,6 +273,31 @@ def test_food_cube_that_blocks_players_is_caught(raw, tmp_path):
     assert "CanCollide" in out
 
 
+def test_world_sized_billboard_is_caught(raw, tmp_path):
+    """The name tags used to be sized in studs, so they shrank to nothing across
+    an arena. Pixel offsets are the only form that holds size on screen."""
+    import re
+
+    def fn(block):
+        return re.sub(r"(<XS>)[^<]*(</XS>)", r"\g<1>0.01\g<2>", block, count=1)
+
+    code, out = verify(write(tmp_path / "studs_tag.rbxlx",
+                             replace_span(raw, "ServerStorage/Character/PlayerDisplay", fn)))
+    assert code == 1
+    assert "PlayerDisplay" in out and "scale units" in out
+
+
+def test_billboard_with_no_range_is_caught(raw, tmp_path):
+    def fn(block):
+        return block.replace('<float name="MaxDistance">600</float>',
+                             '<float name="MaxDistance">0</float>', 1)
+
+    code, out = verify(write(tmp_path / "no_range.rbxlx",
+                             replace_span(raw, "ServerStorage/Character/PlayerDisplay", fn)))
+    assert code == 1
+    assert "MaxDistance" in out
+
+
 # Zone arenas are generated map geometry, which makes them editable in Studio -
 # and a wall dragged off, an arena dropped on the hub, or a model left streamable
 # are all silent breakage: the game still runs, the zones just stop being zones.

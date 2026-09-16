@@ -984,6 +984,37 @@ def main():
                                     % (motion_seen[i][0], key, higher[key],
                                        motion_seen[i - 1][0], lower[key]))
 
+    # ---- 4g. billboards hold their size on screen ---------------------------
+    # A BillboardGui sized in scale units is world-sized: it shrinks as you walk
+    # away and grows as you approach, which is what the player name tags used to
+    # do. Pixel offsets (XS/YS zero) are the only form that keeps a tag the same
+    # size on screen at any distance, and MaxDistance is the range Tags.lua
+    # dissolves against instead of letting Roblox cut the billboard off mid-frame.
+    for path in sorted(by_path):
+        for ref in by_path[path]:
+            if items[ref]["class"] != "BillboardGui":
+                continue
+            inner = prop_of(path, "Size") or ""
+            xs = re.search(r"<XS>([-\d.e]+)</XS>", inner)
+            ys = re.search(r"<YS>([-\d.e]+)</YS>", inner)
+            xo = re.search(r"<XO>([-\d.e]+)</XO>", inner)
+            yo = re.search(r"<YO>([-\d.e]+)</YO>", inner)
+            if not (xs and ys and xo and yo):
+                problems.append("%s has no readable Size" % path)
+                continue
+            if float(xs.group(1)) != 0 or float(ys.group(1)) != 0:
+                problems.append("%s is sized in scale units (%s, %s), which makes it a "
+                                "world-sized billboard that shrinks and grows with distance; "
+                                "tags and signs are pixel sized"
+                                % (path, xs.group(1), ys.group(1)))
+            if float(xo.group(1)) < 40 or float(yo.group(1)) < 16:
+                problems.append("%s is %s x %s pixels - too small to read at arm's length"
+                                % (path, xo.group(1), yo.group(1)))
+            reach = prop_of(path, "MaxDistance")
+            if reach is None or float(reach) <= 0:
+                problems.append("%s has no MaxDistance, so it never fades out and Tags.lua "
+                                "has no range to dissolve against" % path)
+
     admins = child_names(items, by_path["ReplicatedStorage/GameData/Admins"][0])
     if not admins:
         problems.append("GameData/Admins is empty - nobody can use the console")

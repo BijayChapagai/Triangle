@@ -80,7 +80,7 @@ NEW_SERVER_SOURCES = [
 NEW_SHARED_SOURCES = ["GameConfig"]                 # -> ReplicatedStorage/Modules
 NEW_CLIENT_SOURCES = [                              # -> Client/ClientModules
     "LoadingScreen", "Notifier", "Hud", "DeathScreen", "Camera", "Chat", "CoreGui",
-    "KillFeed", "ZoneGuard", "FoodFx",
+    "KillFeed", "ZoneGuard", "FoodFx", "Tags",
 ]
 NEW_MENU_SOURCES = [                                # -> Client/ClientModules/Menus
     "MenuUi", "Tabs", "Rebirth", "Skins", "Quests", "Zones", "Leaderboard",
