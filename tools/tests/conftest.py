@@ -13,6 +13,7 @@ TOOLS = os.path.join(ROOT, "tools")
 SRC = os.path.join(ROOT, "src")
 PLACE = os.path.join(ROOT, "eat the cube.rbxlx")
 BASE = os.path.join(ROOT, "base_cube.rbxlx")
+ORIGINAL = os.path.join(ROOT, "eat the traingles.rbxlx")   # the place the HUD was copied from
 GAMEDATA = os.path.join(SRC, "gamedata.json")
 BUILD = os.path.join(TOOLS, "build.py")
 VERIFY = os.path.join(TOOLS, "verify.py")

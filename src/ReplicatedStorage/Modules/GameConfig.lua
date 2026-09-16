@@ -16,6 +16,7 @@
 --   ReplicatedStorage/GameData/Quests       Type/Goal/RewardCash/RewardSkin/Text
 --   ReplicatedStorage/GameData/Gifts        RequiredTime/Reward/Type
 --   ReplicatedStorage/GameData/Codes        code -> cash
+--   ReplicatedStorage/GameData/Tabs         which menu each HUD tab row opens
 --   ReplicatedStorage/GameData/Products     ProductId/Kind/Amount/Label
 --   ReplicatedStorage/GameData/Gamepasses   GamePassId/Kind
 --   Workspace/Zones/<Name>                  every zone is its own arena: a Model
@@ -88,6 +89,19 @@ export type Quest = {
 
 -- Client preferences. Keys and default values come from GameData/Prefs, so the
 -- value type is whatever the content says it is.
+export type TabEntry = {
+	target: string,   -- a frame name under StarterGui/Frames, or "@Action"
+	label: string,
+	sub: string,
+	color: Color3,
+	order: number,
+}
+
+export type Tab = {
+	name: string,
+	entries: { TabEntry },
+}
+
 export type Prefs = { [string]: boolean | number | string }
 
 local function want(parent: Instance?, name: string): Instance?
@@ -307,6 +321,41 @@ GameConfig.SKINS = SKINS
 function GameConfig.getSkin(skinId: string?): Skin?
 	for _, s in ipairs(SKINS) do
 		if s.id == skinId then return s end
+	end
+	return nil
+end
+
+--// --------------------------------------------------------------------- tabs
+-- The HUD has three tab buttons; each opens a launcher panel whose rows come
+-- from GameData/Tabs, so which menu a row opens - and which tab it lives on - is
+-- a Studio edit rather than a script change. A target starting with "@" names an
+-- action (see Menus/Tabs.lua) instead of a frame.
+local TABS: { Tab } = {}
+local tabsFolder = want(GameData, "Tabs")
+if tabsFolder then
+	for _, tab in ipairs(tabsFolder:GetChildren()) do
+		local entries: { TabEntry } = {}
+		for _, entry in ipairs(tab:GetChildren()) do
+			local target = tostring(valueOf(entry:FindFirstChild("Target"), ""))
+			if target ~= "" then
+				table.insert(entries, {
+					target = target,
+					label = tostring(valueOf(entry:FindFirstChild("Label"), entry.Name)),
+					sub = tostring(valueOf(entry:FindFirstChild("Sub"), "")),
+					color = colorOf(entry, { 0, 200, 255 }),
+					order = tonumber(valueOf(entry:FindFirstChild("Order"), #entries + 1)) or (#entries + 1),
+				})
+			end
+		end
+		table.sort(entries, function(a, b2) return a.order < b2.order end)
+		table.insert(TABS, { name = tab.Name, entries = entries })
+	end
+end
+GameConfig.TABS = TABS
+
+function GameConfig.getTab(name: string): Tab?
+	for _, tab in ipairs(TABS) do
+		if tab.name == name then return tab end
 	end
 	return nil
 end

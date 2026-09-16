@@ -8,26 +8,20 @@
 local Hud = {}
 
 local MarketplaceService = game:GetService("MarketplaceService")
-local SocialService = game:GetService("SocialService")
-local AvatarEditorService = game:GetService("AvatarEditorService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GameConfig = require(ReplicatedStorage.Modules:WaitForChild("GameConfig"))
 local UiModule = require(ReplicatedStorage:WaitForChild("UiModule"))
 
-local MUSIC_ON_IMAGE = "rbxassetid://116374907473809"
-local MUSIC_OFF_IMAGE = "rbxassetid://83783073128505"
 local MUSIC_VOLUME = 0.7
 
 local player
 local buttonsGui, currencyGui
 
--- Music state lives at module scope so the Settings menu and the mute button can
--- both change it without stepping on each other: volume is a preference, mute is
--- a click, and the effective volume is the product of the two.
-local musicSound, musicIcon
-local musicMuted = false
+-- Music volume is a preference (Settings menu), so it lives at module scope and
+-- is applied whenever the sound shows up or the player changes it.
+local musicSound
 local musicVolume = MUSIC_VOLUME
 
 local function applyMusic()
@@ -36,10 +30,7 @@ local function applyMusic()
 		musicSound = folder and folder:FindFirstChild("Music")
 	end
 	if musicSound and musicSound:IsA("Sound") then
-		musicSound.Volume = musicMuted and 0 or musicVolume
-	end
-	if musicIcon then
-		musicIcon.Image = musicMuted and MUSIC_OFF_IMAGE or MUSIC_ON_IMAGE
+		musicSound.Volume = musicVolume
 	end
 end
 
@@ -227,68 +218,6 @@ local function hookPassButtons()
 	end
 end
 
---// ------------------------------------------------------------------ music
-local function hookMusic()
-	local button = resolve(buttonsGui, "Music")
-	if not button then return end
-	UiModule.Animate(button)
-
-	musicIcon = button:FindFirstChild("ImageLabel")
-
-	button.MouseButton1Click:Connect(function()
-		-- workspace.MusicFolder/Music may not exist (or may not have replicated
-		-- yet); the old script indexed it unguarded and errored on click.
-		local folder = workspace:FindFirstChild("MusicFolder")
-		local music = folder and folder:FindFirstChild("Music")
-		if not music or not music:IsA("Sound") then
-			Hud.client.Notify("There is no music in this place.", "bad")
-			return
-		end
-
-		musicSound = music
-		musicMuted = not musicMuted
-		applyMusic()
-	end)
-end
-
---// ------------------------------------------------------ social and store
-local function hookSocial()
-	local favorite = resolve(buttonsGui, "Favorite")
-	if favorite then
-		UiModule.Animate(favorite)
-		favorite.MouseButton1Click:Connect(function()
-			-- Only works from a published place; guard so testing in Studio does
-			-- not error out of the handler.
-			local ok, err = pcall(function()
-				AvatarEditorService:PromptSetFavorite(game.PlaceId, Enum.AvatarItemType.Asset, true)
-			end)
-			if not ok then
-				warn("[Hud] favorite prompt unavailable: " .. tostring(err))
-				Hud.client.Notify("Favouriting is not available right now.", "bad")
-			end
-		end)
-	end
-
-	local invite = resolve(buttonsGui, "InviteFriends")
-	if invite then
-		UiModule.Animate(invite)
-		local function prompt()
-			local ok, allowed = pcall(function()
-				return SocialService:CanSendGameInviteAsync(player)
-			end)
-			-- The old handler checked `resoult == true` even when the call failed,
-			-- so it prompted on errors and stayed silent when invites were off.
-			if ok and allowed == true then
-				pcall(function() SocialService:PromptGameInvite(player) end)
-			else
-				Hud.client.Notify("Invites are not available on this platform.", "bad")
-			end
-		end
-		invite.MouseButton1Click:Connect(prompt)
-		if invite:IsA("ImageButton") then invite.TouchTap:Connect(prompt) end
-	end
-end
-
 local function productForButton(button)
 	-- Prefer the ProductId attribute that ships on the button (editable in
 	-- Studio), then fall back to matching a configured size product by amount.
@@ -381,12 +310,10 @@ function Hud.Init(client)
 	hookAutoFarm()
 	hookKillAll()
 	hookPassButtons()
-	hookMusic()
-	hookSocial()
 	hookStore()
 	hookRewardsNudge()
 
-	-- Volume is a preference; the mute button above stays independent of it.
+	-- Volume is a preference: the Settings menu owns it, and 0 is the mute.
 	Hud.SetMusicVolume(client.Prefs and client.Prefs.MusicVolume)
 	client.onPref("MusicVolume", function(value) Hud.SetMusicVolume(value) end)
 

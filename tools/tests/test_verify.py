@@ -41,13 +41,13 @@ def test_clean_place_passes(raw, tmp_path):
 
 def test_renamed_asset_is_caught(raw, tmp_path):
     def fn(block):
-        return block.replace('<string name="Name">Music</string>',
-                             '<string name="Name">MusicRenamed</string>', 1)
+        return block.replace('<string name="Name">Rewards</string>',
+                             '<string name="Name">RewardsRenamed</string>', 1)
 
     code, out = verify(write(tmp_path / "renamed.rbxlx",
-                             replace_span(raw, "StarterGui/Buttons/Music", fn)))
+                             replace_span(raw, "StarterGui/Buttons/Rewards", fn)))
     assert code == 1
-    assert "StarterGui/Buttons/Music" in out
+    assert "StarterGui/Buttons/Rewards" in out
 
 
 def test_deleted_remote_is_caught(raw, tmp_path):
@@ -177,31 +177,52 @@ def test_repainted_menu_panel_is_caught(raw, tmp_path):
     assert "StarterGui/Frames/Rebirth" in out and "shipped panels" in out
 
 
-def test_swapped_menu_icon_is_caught(raw, tmp_path):
+def test_swapped_tab_icon_is_caught(raw, tmp_path):
     def fn(block):
         return block.replace("rbxassetid://118457362979224", "rbxassetid://1", 1)
 
     code, out = verify(write(tmp_path / "wrong_icon.rbxlx",
-                             replace_span(raw, "StarterGui/Buttons/Rebirth/ImageLabel", fn)))
+                             replace_span(raw, "StarterGui/Buttons/Grow/ImageLabel", fn)))
     assert code == 1
-    assert "Buttons/Rebirth/ImageLabel" in out
+    assert "Buttons/Grow/ImageLabel" in out
 
 
-def test_menu_button_must_stay_an_icon_button(raw, tmp_path):
+def test_tab_button_must_stay_an_icon_button(raw, tmp_path):
     def fn(block):
         return block.replace('<Item class="ImageButton"', '<Item class="TextButton"', 1)
 
     code, out = verify(write(tmp_path / "text_button.rbxlx",
-                             replace_span(raw, "StarterGui/Buttons/Skins", fn)))
+                             replace_span(raw, "StarterGui/Buttons/World", fn)))
     assert code == 1
-    assert "StarterGui/Buttons/Skins" in out and "icon buttons" in out
+    assert "StarterGui/Buttons/World" in out and "icon buttons" in out
+
+
+def test_missing_tab_button_is_caught(raw, tmp_path):
+    """A tab with no button is the whole menu behind it going unreachable: the
+    build skips a button whose name the place already uses, which is how the
+    Store tab silently vanished once."""
+    a, b = span(raw, "StarterGui/Buttons/Deals")
+    code, out = verify(write(tmp_path / "no_tab.rbxlx", raw[:a] + raw[b:]))
+    assert code == 1
+    assert "Buttons/Deals" in out and "unreachable" in out
 
 
 def test_missing_button_caption_is_caught(raw, tmp_path):
-    a, b = span(raw, "StarterGui/Buttons/Quests/TextLabel")
+    a, b = span(raw, "StarterGui/Buttons/Grow/TextLabel")
     code, out = verify(write(tmp_path / "no_caption.rbxlx", raw[:a] + raw[b:]))
     assert code == 1
-    assert "Buttons/Quests" in out and "TextLabel" in out
+    assert "Buttons/Grow" in out and "TextLabel" in out
+
+
+def test_tab_row_pointing_at_a_missing_menu_is_caught(raw, tmp_path):
+    def fn(block):
+        return block.replace('<string name="Value">Rebirth</string>',
+                             '<string name="Value">Rebrth</string>', 1)
+
+    code, out = verify(write(tmp_path / "bad_target.rbxlx",
+                             replace_span(raw, "ReplicatedStorage/GameData/Tabs/Grow/Rebirth/Target", fn)))
+    assert code == 1
+    assert "Rebrth" in out
 
 
 # Zone arenas are generated map geometry, which makes them editable in Studio -

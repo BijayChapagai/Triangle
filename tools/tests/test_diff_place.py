@@ -83,7 +83,13 @@ def test_json_dump(tmp_path):
     assert got["settings"]["GameName"] == "Eat The Cube"
     assert got["zones"]["Greenfield"]["Id"] == 1.0
     assert got["zones"]["Greenfield"]["Top"] == 0.0
-    assert got["menuFrames"]["Rebirth"] == {"Button": True, "Frame": True}
+    assert got["menuFrames"]["Rebirth"] == {"Frame": True}
+    assert got["tabPanels"]["Grow"] == {"Button": True, "Frame": True}
+    assert got["tabData"]["Grow"]["Rebirth"]["Target"] == "Rebirth"
+    assert got["tabData"]["Deals"]["Favorite"]["Target"] == "@Favorite"
+    # read straight back out of the place: a colour written under the wrong
+    # property name comes home as None, and loads as black in Studio.
+    assert got["tabData"]["Deals"]["Shop"]["Color"] == [249, 173, 0]
     with open(GAMEDATA, encoding="utf-8") as f:
         want = json.load(f)
     assert sorted(got["events"]) == sorted(want["events"])

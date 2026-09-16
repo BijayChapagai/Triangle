@@ -45,7 +45,9 @@ def boolean(b, name, value, depth=D + 1):
 
 
 def color(b, name, rgb, depth=D + 1):
-    return b.bare_item("Color3Value", name, [("Color3", "Color3", tuple(rgb))], depth=depth)[0]
+    # A Color3Value carries its colour in the property called "Value"; writing it
+    # under any other name leaves the value at its black default.
+    return b.bare_item("Color3Value", name, [("Color3", "Value", tuple(rgb))], depth=depth)[0]
 
 
 def folder(b, name, children="", depth=D + 1):
@@ -63,6 +65,11 @@ def value_for(b, name, value, depth=D + 1):
     if isinstance(value, (list, tuple)) and len(value) == 3:
         return color(b, name, value, depth)
     return string(b, name, value, depth)
+
+
+def tabs(gd):
+    """The HUD tabs, in order (gd.tabs.items)."""
+    return list((gd.get("tabs") or {}).get("items") or [])
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +170,24 @@ def gamedata(b, gd):
     log = "".join(string(b, str(i), text, D + 2)
                   for i, text in enumerate(gd.get("updateLog", []), start=1))
     sections.append(folder(b, "UpdateLog", log, D + 1))
+
+    # Which menu each tab row opens. The launcher panels live in StarterGui/
+    # Frames; this is the data they read, so retargeting a row - or moving it to
+    # another tab - is a Studio edit. A target that starts with "@" is an action
+    # rather than a frame (Tabs.lua knows those).
+    tab_sections = ""
+    for tab in tabs(gd):
+        entries = ""
+        for order, entry in enumerate(tab["entries"], start=1):
+            entries += folder(b, entry["label"],
+                              string(b, "Target", entry["target"], D + 4)
+                              + string(b, "Sub", entry.get("sub", ""), D + 4)
+                              + num(b, "Order", order, D + 4)
+                              + color(b, "Color", entry.get("color", tab["color"]), D + 4),
+                              D + 3)
+        tab_sections += folder(b, tab["name"], entries, D + 2)
+    sections.append(folder(b, "Tabs", tab_sections, D + 1))
+
     sections.append(prefs(b, gd))
 
     return folder(b, "GameData", "".join(sections), D)
@@ -279,25 +304,23 @@ def text_overrides(text, size=17, scaled=False, x_align=0, wrapped=False, rich=T
 
 
 # ---------------------------------------------------------------------------
-# menu buttons (StarterGui/Buttons)
+# tab buttons (StarterGui/Buttons)
 # ---------------------------------------------------------------------------
 
-def menu_buttons(b, gd):
-    """One icon button per menu, built the way the shipped HUD builds theirs.
+def tab_buttons(b, gd):
+    """Three tab buttons, built the way the shipped HUD builds its own buttons.
 
     StarterGui/Buttons/Music is the model: a coloured rounded rect with a black
     outline, the game's button plate as its Image (which ships invisible, so the
     body colour shows), an ImageLabel icon that UiModule.Animate wiggles on hover
     and a caption hanging underneath. Nothing here is a new visual idea.
 
-    The row runs along the top of the safe area because the original HUD already
-    owns both side columns (InviteFriends..VIP) and the bottom band (2xCash,
-    KillAll, 2xSpeed); slots are explicit so verify.py can prove nothing overlaps.
+    Each tab takes a slot the shipped Invite / Music / Favorite buttons used to
+    occupy (those buttons are gone, so nothing overlaps), and each opens a
+    launcher panel whose rows open the real menus - see gd.tabs.
     """
     ui = gd["ui"]
     F = fonts(ui)
-    xs, ys = ui["menuGridX"], ui["menuGridY"]
-    slots = ui.get("menuSlots") or []
     w, h = ui["buttonSize"]
     corner = ui.get("buttonCorner", 8)
     stroke_rgb = ui.get("buttonStroke", [0, 0, 0])
@@ -309,20 +332,17 @@ def menu_buttons(b, gd):
     plate = ui.get("buttonPlate", "")
 
     out = []
-    for i, menu in enumerate(gd["menus"]):
-        if i < len(slots):
-            x, y = slots[i]
-        else:
-            # Past the end of the slot list: fall back to the grid so a new menu
-            # is still visible (and overlapping) rather than silently missing.
-            x = xs[i % len(xs)]
-            y = ys[min(i // len(xs), len(ys) - 1)]
+    for i, tab in enumerate(tabs(gd)):
+        # No explicit slot: stack down the left column the shipped buttons used,
+        # at their spacing, so a fourth tab is still visible (and verify.py can
+        # still prove it does not overlap anything).
+        x, y = tab.get("slot") or [0.027524806559085846, 0.364469975233078 + 0.1363 * i]
 
         props = {
             "Position": ("UDim2", (x, 0, y, 0)),
             "Size": ("UDim2", (w, 0, h, 0)),
             "AnchorPoint": ("Vector2", (0, 0)),
-            "BackgroundColor3": ("Color3", tuple(menu["color"])),
+            "BackgroundColor3": ("Color3", tuple(tab["color"])),
             "BackgroundTransparency": 0.0,
             "BorderSizePixel": 0,
             "Image": ("Content", "<url>%s</url>" % plate) if plate else ("Content", "<null></null>"),
@@ -343,7 +363,7 @@ def menu_buttons(b, gd):
             "Size": ("UDim2", (icon_size, 0, icon_size, 0)),
             "BackgroundTransparency": 1.0,
             "BorderSizePixel": 0,
-            "Image": ("Content", "<url>%s</url>" % menu["icon"]),
+            "Image": ("Content", "<url>%s</url>" % tab["icon"]),
             "ImageColor3": ("Color3", (255, 255, 255)),
             "ImageTransparency": 0.0,
             "ScaleType": 0,
@@ -361,7 +381,7 @@ def menu_buttons(b, gd):
             "ZIndex": 1,
             "LayoutOrder": 0,
         }
-        cap_props.update(text_overrides(menu["label"], size=14, scaled=True, x_align=2,
+        cap_props.update(text_overrides(tab.get("label", tab["name"]), size=14, scaled=True, x_align=2,
                                         wrapped=True, truncate=0, color=(255, 255, 255),
                                         font=F["main"]))
 
@@ -375,7 +395,7 @@ def menu_buttons(b, gd):
                      depth=D + 1)[0]
             + ui_aspect(b, ui.get("buttonAspect", 0.995738626), depth=D + 1)
         )
-        out.append(b.item("ImageButton", menu["name"], props, children=children, depth=D)[0])
+        out.append(b.item("ImageButton", tab["name"], props, children=children, depth=D)[0])
     return "".join(out)
 
 
@@ -501,19 +521,27 @@ def section_template(b, ui, depth=D + 2):
 
 
 def menu_frames(b, gd):
-    """One panel per menu, styled like Frames/UpdateLog and Frames/Codes.
+    """One panel per menu - and per tab - styled like Frames/UpdateLog, Frames/Codes.
 
     White panel, black outline, the title straddling the top edge in the game's
     purple, a transparent scrolling list of cyan rows. Child names (Title, List,
-    RowTemplate, SectionTemplate, Close, and Status/ClaimAll/CommandBar where the
-    menu asks for them) are the contract MenuUi and the menu modules code against.
+    RowTemplate, SectionTemplate, Close, and Status/ClaimAll where the menu asks
+    for them) are the contract MenuUi and the menu modules code against.
+
+    Panels are big on purpose (ui.frameSize): rows, progress bars and the
+    scrollbar all have to fit without clipping. A tab launcher uses the compact
+    ui.tabFrameSize with taller rows, so its three tiles read as tiles.
     """
-    ui = gd["ui"]
-    F = fonts(ui)
-    fw, fh = ui["frameSize"]
-    stroke = ui.get("panelStroke", [0, 0, 0])
+    stroke = gd["ui"].get("panelStroke", [0, 0, 0])
+    specs = [(menu, gd["ui"]["frameSize"], gd["ui"]["rowHeight"]) for menu in gd["menus"]]
+    specs += [(tab, gd["ui"]["tabFrameSize"], gd["ui"]["tabRowHeight"]) for tab in tabs(gd)]
     out = []
-    for menu in gd["menus"]:
+    for menu, frame_size, row_height in specs:
+        # The row and section templates take their height from ui, so hand them a
+        # copy that carries this panel's row height.
+        ui = dict(gd["ui"], rowHeight=row_height)
+        F = fonts(ui)
+        fw, fh = frame_size
         name = menu["name"]
         accent = menu["color"]
         has_status = bool(menu.get("status"))
@@ -1097,7 +1125,7 @@ def build(b, gd):
     return {
         "ReplicatedStorage": gamedata(b, gd),
         "ReplicatedStorage/Events": events(b, gd),
-        "StarterGui/Buttons": menu_buttons(b, gd),
+        "StarterGui/Buttons": tab_buttons(b, gd),
         "StarterGui/Frames": menu_frames(b, gd),
         "StarterGui": killfeed(b, gd) + zonewarn(b, gd),
         "Workspace": zones(b, gd),

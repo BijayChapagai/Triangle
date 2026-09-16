@@ -83,7 +83,7 @@ NEW_CLIENT_SOURCES = [                              # -> Client/ClientModules
     "KillFeed", "ZoneGuard",
 ]
 NEW_MENU_SOURCES = [                                # -> Client/ClientModules/Menus
-    "MenuUi", "Rebirth", "Skins", "Quests", "Zones", "Leaderboard", "Admin",
+    "MenuUi", "Tabs", "Rebirth", "Skins", "Quests", "Zones", "Leaderboard",
     "Codes", "Shop", "Rewards", "UpdateLog", "Settings",
 ]
 
@@ -277,17 +277,20 @@ def main():
     gd["events"] = [e for e in gd["events"] if e not in have_events]
     have_buttons = child_names("StarterGui/Buttons")
     have_frames = child_names("StarterGui/Frames")
-    gd_menus = [m for m in gd["menus"]
-                if m["name"] not in have_buttons and m["name"] not in have_frames]
-    buttons_only = [m for m in gd_menus if m["name"] not in have_buttons]
-    frames_only = [m for m in gd_menus if m["name"] not in have_frames]
+    # Menus are panels now - they are reached through the tab buttons - so a menu
+    # is skipped only when its frame is already in the place. Tabs need both a
+    # button and a launcher panel, and each is filtered on its own.
+    gd_menus = [m for m in gd["menus"] if m["name"] not in have_frames]
+    gd_tab_buttons = [t for t in content.tabs(gd) if t["name"] not in have_buttons]
+    gd_tab_frames = [t for t in content.tabs(gd) if t["name"] not in have_frames]
 
     chunks = {}
     if not child_names("ReplicatedStorage") & {"GameData"}:
         chunks["ReplicatedStorage"] = content.gamedata(b, gd)
     chunks["ReplicatedStorage/Events"] = content.events(b, gd)
-    chunks["StarterGui/Buttons"] = content.menu_buttons(b, dict(gd, menus=buttons_only))
-    chunks["StarterGui/Frames"] = content.menu_frames(b, dict(gd, menus=frames_only))
+    chunks["StarterGui/Buttons"] = content.tab_buttons(b, dict(gd, tabs={"items": gd_tab_buttons}))
+    chunks["StarterGui/Frames"] = content.menu_frames(
+        b, dict(gd, menus=gd_menus, tabs={"items": gd_tab_frames}))
 
     # Stand-alone ScreenGuis, each injected only if the place does not have one
     # with that name yet.

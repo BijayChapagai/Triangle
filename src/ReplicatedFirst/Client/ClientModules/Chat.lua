@@ -1,8 +1,9 @@
 -- Chat: a welcome message and "!" shortcuts.
 --
--- The shortcuts matter because the Admin menu is a TextBox, which is awkward on
--- console and impossible on some devices: an admin can type "!givecash Bob 1000"
--- straight into chat. Everything is still validated server side.
+-- The shortcuts matter on console and mobile, where the menus are a few taps
+-- away: "!quests" opens the panel directly. An admin can also run server
+-- commands from here ("!admin givecash Bob 1000"), and the reply comes back into
+-- chat rather than into a panel. Everything is still validated server side.
 local Chat = {}
 
 local Players = game:GetService("Players")
@@ -68,7 +69,8 @@ local function handleCommand(client, player, text)
 	local menu = ({
 		gifts = "Rewards", rewards = "Rewards", skins = "Skins", ranks = "Leaderboard",
 		leaderboard = "Leaderboard", quests = "Quests", zones = "Zones", codes = "Codes",
-		shop = "Shop", update = "UpdateLog", log = "UpdateLog",
+		shop = "Shop", update = "UpdateLog", log = "UpdateLog", settings = "Settings",
+		grow = "Grow", world = "World", store = "Store",
 	})[head]
 	if menu then
 		local menus = client.Modules and client.Modules.MenuUi
@@ -92,6 +94,12 @@ function Chat.Init(client)
 
 	-- Player.Chatted fires on the client for your own messages too, which is what
 	-- makes the shortcuts possible without a server round trip for non-admins.
+	-- Admin command output used to land in the console panel; with the panel gone
+	-- it lands in chat, which is where the command was typed.
+	client.on("Admin", function(text)
+		systemMessage(tostring(text), Color3.fromRGB(255, 215, 90))
+	end)
+
 	player.Chatted:Connect(function(message)
 		if typeof(message) ~= "string" then return end
 		if message:sub(1, #PREFIX) ~= PREFIX then return end

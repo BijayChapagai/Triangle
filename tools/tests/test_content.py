@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from conftest import BASE, GAMEDATA, read
+from conftest import BASE, GAMEDATA, ORIGINAL, PLACE, read
 
 # The kinds the server actually handles. Adding one here without a handler in
 # Shop.lua / Progression.lua / Gifts.lua is a bug, and vice versa.
@@ -267,26 +267,67 @@ def test_gamepasses(gd):
 
 # --- ui ---------------------------------------------------------------------
 
-def test_menus_have_a_button_slot(gd):
+def test_tabs_have_a_button_slot(gd):
     """Slots are hand-picked; verify.py checks they do not overlap the base HUD."""
-    slots = gd["ui"]["menuSlots"]
-    assert len(gd["menus"]) <= len(slots), (
-        "more menus than slots: add one to ui.menuSlots")
-    assert len(set(tuple(s) for s in slots)) == len(slots), "two menus share a slot"
+    tabs = gd["tabs"]["items"]
+    slots = [t.get("slot") for t in tabs]
+    assert all(slot is not None for slot in slots), "every tab needs an explicit slot"
+    assert len(set(tuple(slot) for slot in slots)) == len(slots), "two tabs share a slot"
     w, h = gd["ui"]["buttonSize"]
     for x, y in slots:
         assert 0 <= x and x + w <= 1, "slot %s is off screen" % [x, y]
         assert 0 <= y and y + h <= 1, "slot %s is off screen" % [x, y]
-    names = [m["name"] for m in gd["menus"]]
+    names = [t["name"] for t in tabs]
     assert len(names) == len(set(names))
-    assert all(color_ok(m["color"]) and m["label"] for m in gd["menus"])
+    assert all(color_ok(t["color"]) and t["label"] for t in tabs)
+
+
+def test_every_menu_is_reachable_from_exactly_one_tab_row(gd):
+    """The HUD bar carries three tabs and nothing else of ours: a menu with no row
+    is unreachable, and a menu with two rows is the duplication the tabs exist to
+    remove. Shipped panels (Shop, Codes) are rows too, and only once."""
+    tabs = gd["tabs"]["items"]
+    menus = [m["name"] for m in gd["menus"]]
+    shipped_panels = {"Shop", "Codes", "VIP", "Rewards", "UpdateLog"}
+
+    targets = [e["target"] for t in tabs for e in t["entries"]]
+    assert len(targets) == len(set(targets)), "a menu is reachable from two tab rows"
+    for target in targets:
+        assert target.startswith("@") or target in menus or target in shipped_panels, (
+            "tab row %r opens nothing that exists" % target)
+    for name in menus:
+        assert name in targets, "%s has a panel but no tab row opens it" % name
+
+    for tab in tabs:
+        assert tab["entries"], "%s would open an empty panel" % tab["name"]
+        for entry in tab["entries"]:
+            assert entry["label"] and entry.get("sub"), entry
+            assert color_ok(entry.get("color", tab["color"])), entry
 
 
 def test_ui_numbers_are_in_range(gd):
     ui = gd["ui"]
-    for key in ("menuGridX", "menuGridY", "buttonSize"):
-        assert all(0 <= v <= 1 for v in ui[key]), "%s must be in scale units" % key
-    assert ui["rowHeight"] > 0
+    for key in ("buttonSize", "frameSize", "tabFrameSize"):
+        assert all(0 < v <= 1 for v in ui[key]), "%s must be in scale units" % key
+    assert ui["rowHeight"] > 0 and ui["tabRowHeight"] > 0
+
+
+def test_panels_are_big_enough_for_their_rows(gd):
+    """A popup that clips its own content is the complaint this guards: at a
+    1080p viewport the panel must hold the rows it is asked to show, with the
+    title band and the list padding taken off the top."""
+    ui = gd["ui"]
+    viewport = 1080
+
+    def usable_rows(size_key, row_key):
+        height = ui[size_key][1] * viewport
+        return (height * 0.8) / ui[row_key]     # 0.8: title band + list padding
+
+    assert usable_rows("frameSize", "rowHeight") >= 6, (
+        "menu panels only fit %.1f rows" % usable_rows("frameSize", "rowHeight"))
+    widest = max(len(t["entries"]) for t in gd["tabs"]["items"])
+    assert usable_rows("tabFrameSize", "tabRowHeight") >= widest, (
+        "a tab panel cannot show all %d of its rows without scrolling" % widest)
 
 
 def test_events_are_unique_identifiers(gd):
@@ -329,12 +370,21 @@ def test_autofarm_distances_are_sane(gd):
 
 @pytest.fixture(scope="session")
 def shipped_assets():
-    """Every asset URL the base place already references."""
+    """Every asset URL the game already ships.
+
+    Both places count. base_cube.rbxlx is what the build starts from;
+    eat the traingles.rbxlx is the original the HUD was copied from. Art from a
+    button this build removes (Shop, Codes, Music, Favorite, Invite) is still art
+    the game shipped, so a tab may reuse it rather than invent an icon.
+    """
     import re
 
-    return set(re.findall(
-        r"<url>((?:rbxassetid://|rbxasset://|https?://[^<]*roblox\.com/asset/)[^<]*)</url>",
-        read(BASE)))
+    urls = set()
+    for path in (BASE, ORIGINAL):
+        urls.update(re.findall(
+            r"<url>((?:rbxassetid://|rbxasset://|https?://[^<]*roblox\.com/asset/)[^<]*)</url>",
+            read(path)))
+    return urls
 
 
 def asset_id(url):
@@ -350,12 +400,12 @@ def shipped_ids(shipped_assets):
     return set(filter(None, (asset_id(u) for u in shipped_assets)))
 
 
-def test_menu_icons_are_assets_the_game_already_ships(gd, shipped_assets):
+def test_tab_icons_are_assets_the_game_already_ships(gd, shipped_assets):
     shipped = shipped_ids(shipped_assets)
-    for menu in gd["menus"]:
-        assert asset_id(menu.get("icon")) in shipped, (
-            "%s icon %r is not art the base place already uses - the menu bar would "
-            "be the only place in the game with that icon" % (menu["name"], menu.get("icon")))
+    for tab in gd["tabs"]["items"]:
+        assert asset_id(tab.get("icon")) in shipped, (
+            "%s icon %r is not art the base place already uses - the HUD bar would "
+            "be the only place in the game with that icon" % (tab["name"], tab.get("icon")))
 
 
 def test_button_plate_is_the_shipped_one(gd, shipped_assets):
@@ -371,22 +421,47 @@ def test_ui_fonts_are_the_shipped_families(gd, shipped_assets):
     assert fonts["altWeight"] in (400, 500, 700, 900)
 
 
-def test_menu_buttons_sit_in_the_free_top_band(gd):
-    """One row along the top: the original HUD owns both side columns (Invite
-    .. VIP) and the bottom band (2xCash, KillAll, 2xSpeed), and verify.py fails
-    the build if a generated button lands on any of them."""
+def test_tab_buttons_take_the_slots_the_old_buttons_left(gd):
+    """The tabs reuse the exact slots the shipped Invite / Music / Favorite
+    buttons occupied - those buttons are removed, so the HUD keeps its shape and
+    nothing overlaps. verify.py proves it against the place as well."""
     ui = gd["ui"]
-    slots = ui["menuSlots"][:len(gd["menus"])]
     w, h = ui["buttonSize"]
-    ys = sorted(set(y for _x, y in slots))
-    assert len(ys) == 1, "menu buttons must sit on one row, got %s" % ys
-    assert ys[0] + h < 0.2, "the menu row belongs above the original HUD (y=%s)" % ys[0]
+    freed = [(0.027524806559085846, 0.364469975233078),    # InviteFriends
+             (0.11308054625988007, 0.3644714951515198),    # Music
+             (0.0264138802886008, 0.500760018825531)]      # Favorite
+    slots = [tuple(t["slot"]) for t in gd["tabs"]["items"]]
+    assert len(slots) == len(freed), "three buttons were removed, so three tabs fit"
+    for slot in slots:
+        assert any(abs(slot[0] - x) < 1e-6 and abs(slot[1] - y) < 1e-6 for x, y in freed), (
+            "tab slot %s is not one the removed buttons left free" % [slot])
+    for i, (ax, ay) in enumerate(slots):
+        for bx, by in slots[i + 1:]:
+            assert abs(ax - bx) >= w or abs(ay - by) >= h, "two tabs overlap"
 
-    xs = [x for x, _y in slots]
-    assert xs == sorted(xs), "slots must run left to right"
-    for a, b in zip(xs, xs[1:]):
-        assert b - a >= w, "buttons at %s and %s would touch (width %s)" % (a, b, w)
-    assert xs[0] >= 0 and xs[-1] + w <= 1, "the row must fit on screen"
+
+def test_place_color_values_are_written_under_value():
+    """A Color3Value whose colour sits in any property but "Value" loads as black
+    in Studio. That is exactly how the food, the skins and the zone signs lost
+    their colour, so the built place is checked rather than the generator.
+
+    Only Color3Value items are looked at: a Texture really does have a property
+    called Color3, and that one is correct as it is.
+    """
+    import rbxlx
+
+    raw = read(PLACE)
+    items, order = rbxlx.parse(rbxlx.mask_cdata(raw))
+    checked = 0
+    for ref in order:
+        if items[ref]["class"] != "Color3Value":
+            continue
+        checked += 1
+        block = raw[items[ref]["start"]:items[ref]["end"]]
+        assert '<Color3 name="Value">' in block, (
+            "Color3Value %s carries its colour under the wrong property name - "
+            "Roblox ignores it and the value loads black" % items[ref]["name"])
+    assert checked >= 10, "rarities, skins, zones and tab rows all carry a Color3Value"
 
 
 def test_ui_palette_is_real_colors(gd):

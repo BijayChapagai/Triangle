@@ -38,7 +38,11 @@ SCALAR_RE = {
     "StringValue": re.compile(r'<string name="Value">([^<]*)</'),
     "BoolValue": re.compile(r'<bool name="Value">([^<]*)</'),
 }
-COLOR_RE = re.compile(r'<Color3 name="Color3">\s*<R>([^<]*)</R>\s*<G>([^<]*)</G>\s*<B>([^<]*)</B>')
+# A Color3Value stores its colour in the property named "Value". Anything else is
+# ignored by Roblox, which leaves the value at its black default - and black zone
+# colours, black rarity colours and black skins in game. So this only ever
+# matches the correct form: a regression shows up as drift instead of shipping.
+COLOR_RE = re.compile(r'<Color3 name="Value">\s*<R>([^<]*)</R>\s*<G>([^<]*)</G>\s*<B>([^<]*)</B>')
 CFRAME_RE = re.compile(r'<CoordinateFrame name="CFrame">\s*<X>([^<]*)</X>\s*<Y>([^<]*)</Y>\s*<Z>([^<]*)</Z>')
 SIZE_RE = re.compile(r'<Vector3 name="size">\s*<X>([^<]*)</X>\s*<Y>([^<]*)</Y>\s*<Z>([^<]*)</Z>')
 NAME_RE = re.compile(r'<string name="Name">([^<]*)</string>')
@@ -168,8 +172,13 @@ def actual(place, gd):
 
     buttons = set(place.names("StarterGui/Buttons"))
     frames = set(name for name, cls, _ref in place.children("StarterGui/Frames") if cls == "Frame")
-    out["menuFrames"] = dict((m["name"], {"Button": m["name"] in buttons, "Frame": m["name"] in frames})
-                             for m in gd["menus"])
+    tab_items = (gd.get("tabs") or {}).get("items") or []
+    # A menu is a panel reached through a tab row, so it needs a frame and
+    # nothing else; a tab needs both its HUD button and its launcher panel.
+    out["menuFrames"] = dict((m["name"], {"Frame": m["name"] in frames}) for m in gd["menus"])
+    out["tabPanels"] = dict((t["name"], {"Button": t["name"] in buttons, "Frame": t["name"] in frames})
+                            for t in tab_items)
+    out["tabData"] = place.value(data + "/Tabs") or {}
 
     return out
 
@@ -221,7 +230,14 @@ def expected(gd):
                                      "Top": floor_y})
                         for z in gd["zones"])
 
-    out["menuFrames"] = dict((m["name"], {"Button": True, "Frame": True}) for m in gd["menus"])
+    out["menuFrames"] = dict((m["name"], {"Frame": True}) for m in gd["menus"])
+    tab_items = (gd.get("tabs") or {}).get("items") or []
+    out["tabPanels"] = dict((t["name"], {"Button": True, "Frame": True}) for t in tab_items)
+    out["tabData"] = dict(
+        (t["name"], dict((e["label"], {"Target": e["target"], "Sub": e.get("sub", ""),
+                                       "Order": float(i), "Color": list(e.get("color", t["color"]))})
+                         for i, e in enumerate(t["entries"], start=1)))
+        for t in tab_items)
     return out
 
 

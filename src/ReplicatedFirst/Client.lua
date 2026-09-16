@@ -199,9 +199,11 @@ local function bootUi()
 	run("Camera", function(m) m.Init(Client) end)
 	run("Popups", function(m) m.Init(Client) end)
 
-	-- Menus first: Hud buttons toggle them, and each menu registers its frame.
+	-- Menus first: the HUD tabs and Hud buttons toggle them, and each menu
+	-- registers its frame. Tabs comes first so the launchers are ready before
+	-- anything can open them.
 	run("MenuUi", function(m) m.Init(Client) end)
-	local menuNames = { "Rebirth", "Skins", "Quests", "Zones", "Leaderboard", "Admin",
+	local menuNames = { "Tabs", "Rebirth", "Skins", "Quests", "Zones", "Leaderboard",
 		"Codes", "Shop", "Rewards", "UpdateLog", "Settings" }
 	for index, name in ipairs(menuNames) do
 		start(name, menus)

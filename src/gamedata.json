@@ -597,7 +597,6 @@
     {
       "name": "Rebirth",
       "label": "Rebirth",
-      "icon": "rbxassetid://118457362979224",
       "color": [
         255,
         170,
@@ -607,7 +606,6 @@
     {
       "name": "Skins",
       "label": "Skins",
-      "icon": "rbxassetid://104510768093702",
       "color": [
         255,
         0,
@@ -617,7 +615,6 @@
     {
       "name": "Quests",
       "label": "Quests",
-      "icon": "rbxassetid://140055770728143",
       "color": [
         35,
         255,
@@ -629,7 +626,6 @@
     {
       "name": "Zones",
       "label": "Zones",
-      "icon": "rbxassetid://110631703137481",
       "color": [
         85,
         255,
@@ -640,7 +636,6 @@
     {
       "name": "Leaderboard",
       "label": "Ranks",
-      "icon": "rbxassetid://13801406576",
       "color": [
         249,
         173,
@@ -648,20 +643,8 @@
       ]
     },
     {
-      "name": "Admin",
-      "label": "Admin",
-      "icon": "rbxassetid://84556369840359",
-      "color": [
-        255,
-        60,
-        60
-      ],
-      "commandBar": true
-    },
-    {
       "name": "Settings",
       "label": "Settings",
-      "icon": "rbxassetid://82936983585929",
       "color": [
         170,
         85,
@@ -671,56 +654,14 @@
   ],
   "ui": {
     "_readme": [
-      "Generated menus are built in the style the place already ships with, so they",
-      "sit next to the original HUD instead of on top of it: purple icon buttons",
-      "with a black outline and a caption underneath (StarterGui/Buttons/Music),",
-      "white panels with a purple title (StarterGui/Frames/UpdateLog), cyan rows",
-      "with chunky FredokaOne text (StarterGui/Frames/Rewards/Rewards/Reward1).",
-      "Every colour, image and font below is one the base place already uses.",
-      "Restyle by editing these numbers - the generator only lays them out."
-    ],
-    "menuSlots": [
-      [
-        0.2393,
-        0.012
-      ],
-      [
-        0.3158,
-        0.012
-      ],
-      [
-        0.3923,
-        0.012
-      ],
-      [
-        0.4688,
-        0.012
-      ],
-      [
-        0.5453,
-        0.012
-      ],
-      [
-        0.6218,
-        0.012
-      ],
-      [
-        0.6983,
-        0.012
-      ]
-    ],
-    "menuGridX": [
-      0.2393,
-      0.3158,
-      0.3923,
-      0.4688,
-      0.5453,
-      0.6218,
-      0.6983
-    ],
-    "menuGridY": [
-      0.012,
-      0.135
+      "The HUD keeps the original layout. Three tab buttons sit in the slots the",
+      "Invite / Music / Favorite buttons used to occupy; each opens a panel of",
+      "rows, and each row opens one of the menus under StarterGui/Frames.",
+      "Panels are deliberately large (frameSize / tabFrameSize) so rows, progress",
+      "bars and scrollbars fit without clipping; uiScale in settings shrinks the",
+      "whole HUD for small screens.",
+      "Shipped art (button plates, fonts, corner/stroke radii) is reused by",
+      "reference id so nothing is invented."
     ],
     "buttonSize": [
       0.062,
@@ -747,8 +688,8 @@
     ],
     "captionMaxText": 23,
     "frameSize": [
-      0.5,
-      0.62
+      0.64,
+      0.78
     ],
     "panelColor": [
       255,
@@ -883,7 +824,12 @@
         173,
         0
       ]
-    }
+    },
+    "tabFrameSize": [
+      0.5,
+      0.44
+    ],
+    "tabRowHeight": 92
   },
   "prefs": {
     "AutoFarmFlee": true,
@@ -918,5 +864,155 @@
     "New: rebirths, 11 skins (size, cash and rebirth unlocks), daily quests.",
     "New: global Size and Cash leaderboards, VIP wing food, admin console.",
     "Fixed: food no longer sticks to the map, kills transfer size, gifts and codes actually pay out."
-  ]
+  ],
+  "tabs": {
+    "_readme": [
+      "Three HUD tabs replace the Invite / Music / Favorite buttons: each opens a",
+      "panel of rows, and each row opens one of the real menus. Entries are",
+      "generated into ReplicatedStorage/GameData/Tabs, so retargeting a row or",
+      "moving it to another tab is a Studio edit - no script changes.",
+      "A target starting with @ is an action rather than a frame (@Favorite).",
+      "Names must not collide with shipped HUD instances: the place already has a Store button, so the third tab is Deals."
+    ],
+    "items": [
+      {
+        "name": "Grow",
+        "label": "Grow",
+        "icon": "rbxassetid://118457362979224",
+        "color": [
+          255,
+          170,
+          0
+        ],
+        "slot": [
+          0.027524806559085846,
+          0.364469975233078
+        ],
+        "entries": [
+          {
+            "target": "Rebirth",
+            "label": "Rebirth",
+            "sub": "Reset your size for a permanent multiplier",
+            "color": [
+              255,
+              170,
+              0
+            ]
+          },
+          {
+            "target": "Skins",
+            "label": "Skins",
+            "sub": "Colour your cube",
+            "color": [
+              255,
+              0,
+              127
+            ]
+          },
+          {
+            "target": "Quests",
+            "label": "Quests",
+            "sub": "Daily goals for cash and skins",
+            "color": [
+              35,
+              255,
+              70
+            ]
+          }
+        ]
+      },
+      {
+        "name": "World",
+        "label": "World",
+        "icon": "rbxassetid://110631703137481",
+        "color": [
+          85,
+          255,
+          255
+        ],
+        "slot": [
+          0.11308054625988007,
+          0.3644714951515198
+        ],
+        "entries": [
+          {
+            "target": "Zones",
+            "label": "Zones",
+            "sub": "Travel to a rarity arena",
+            "color": [
+              85,
+              255,
+              255
+            ]
+          },
+          {
+            "target": "Leaderboard",
+            "label": "Ranks",
+            "sub": "The biggest cubes right now",
+            "color": [
+              249,
+              173,
+              0
+            ]
+          },
+          {
+            "target": "Settings",
+            "label": "Settings",
+            "sub": "Music, UI scale and effects",
+            "color": [
+              170,
+              85,
+              255
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Deals",
+        "label": "Deals",
+        "icon": "rbxassetid://79631765729854",
+        "color": [
+          249,
+          173,
+          0
+        ],
+        "slot": [
+          0.0264138802886008,
+          0.500760018825531
+        ],
+        "entries": [
+          {
+            "target": "Shop",
+            "label": "Shop",
+            "sub": "Gamepasses and size packs",
+            "color": [
+              249,
+              173,
+              0
+            ]
+          },
+          {
+            "target": "@Favorite",
+            "label": "Favorite",
+            "sub": "Favourite this game",
+            "color": [
+              255,
+              0,
+              127
+            ]
+          },
+          {
+            "target": "Codes",
+            "label": "Codes",
+            "sub": "Redeem a code for cash",
+            "color": [
+              35,
+              255,
+              70
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }
