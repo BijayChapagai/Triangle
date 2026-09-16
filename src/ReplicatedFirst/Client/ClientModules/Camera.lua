@@ -18,16 +18,36 @@ local PUNCH_COOLDOWN = 0.4
 local camera
 local punching = false
 local lastPunch = 0
+local punchEnabled = true
+local motionEnabled = true
+
+-- Both are player preferences (GameData/Prefs). Reduced motion is the wider one:
+-- it kills the fov kick and makes every transition this module owns instant.
+function Camera.SetPunchEnabled(on)
+	punchEnabled = on ~= false
+end
+
+function Camera.SetMotionEnabled(on)
+	motionEnabled = on ~= false
+	if not motionEnabled and camera then
+		camera.FieldOfView = BASE_FOV
+	end
+end
 
 function Camera.setFov(fov, time)
 	if not camera then return end
+	fov = tonumber(fov) or BASE_FOV
+	if not motionEnabled then
+		camera.FieldOfView = fov
+		return
+	end
 	TweenService:Create(camera, TweenInfo.new(time or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		FieldOfView = tonumber(fov) or BASE_FOV,
+		FieldOfView = fov,
 	}):Play()
 end
 
 function Camera.punch(amount)
-	if not camera or punching then return end
+	if not camera or punching or not punchEnabled or not motionEnabled then return end
 	local now = os.clock()
 	if now - lastPunch < PUNCH_COOLDOWN then return end
 	lastPunch = now
@@ -54,6 +74,13 @@ function Camera.Init(client)
 	end
 
 	local player = client and client.Player or Players.LocalPlayer
+
+	-- Preferences before anything can punch: Client.Prefs already holds the
+	-- defaults at this point, and the listeners pick up the saved values.
+	Camera.SetPunchEnabled(client.Prefs and client.Prefs.CameraPunch)
+	Camera.SetMotionEnabled(not (client.Prefs and client.Prefs.ReducedMotion))
+	client.onPref("CameraPunch", function(value) Camera.SetPunchEnabled(value) end)
+	client.onPref("ReducedMotion", function(value) Camera.SetMotionEnabled(not value) end)
 
 	camera.CameraType = Enum.CameraType.Custom
 	camera.FieldOfView = BASE_FOV

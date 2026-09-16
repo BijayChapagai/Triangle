@@ -8092,6 +8092,44 @@ Client.GameConfig = GameConfig
 Client.Ui = UiModule
 Client.Events = ReplicatedStorage:WaitForChild("Events", 60)
 
+--// ------------------------------------------------------------------ settings
+-- Client preferences: defaults from GameData/Prefs, the player's own values from
+-- their profile. Consumers register a listener instead of being named here, so
+-- adding a setting in Studio needs no change to this file.
+Client.Prefs = GameConfig.mergePrefs(nil)
+local savedPrefs = {}
+local prefListeners = {}
+
+function Client.onPref(key, fn)
+	table.insert(prefListeners, { key = key, fn = fn })
+end
+
+function Client.applyPrefs(prefs)
+	savedPrefs = type(prefs) == "table" and prefs or {}
+	Client.Prefs = GameConfig.mergePrefs(savedPrefs)
+	for _, listener in ipairs(prefListeners) do
+		local ok, err = pcall(listener.fn, Client.Prefs[listener.key], Client.Prefs)
+		if not ok then
+			warn(("[Client] preference listener for %s failed: %s")
+				:format(listener.key, tostring(err)))
+		end
+	end
+end
+
+function Client.setPref(key, value)
+	if GameConfig.PREFS[key] == nil then return end
+	savedPrefs[key] = value
+	Client.fire("SavePrefs", key, value)
+	-- Applied immediately: waiting for the server echo would make a toggle feel
+	-- broken, and the echo only confirms what was stored.
+	Client.applyPrefs(savedPrefs)
+end
+
+Client.on("SavePrefs", function(prefs)
+	Client.applyPrefs(prefs)
+end)
+Client.fire("SavePrefs") -- ask for the saved values; the defaults are already live
+
 if LoadingScreen then
 	LoadingScreen.SetTitle(GameConfig.GAME_NAME)
 	LoadingScreen.SetProgress(0.3, "Reading game data...")
@@ -8120,6 +8158,8 @@ local Hud = start("Hud")
 local DeathScreen = start("DeathScreen")
 local VipDoor = start("VipDoor")
 local Chat = start("Chat")
+local KillFeed = start("KillFeed")
+local ZoneGuard = start("ZoneGuard")
 local MenuUi = start("MenuUi", menus)
 
 if LoadingScreen then LoadingScreen.SetProgress(0.5, "Building the interface...") end
@@ -8134,7 +8174,7 @@ local function bootUi()
 	-- Menus first: Hud buttons toggle them, and each menu registers its frame.
 	run("MenuUi", function(m) m.Init(Client) end)
 	local menuNames = { "Rebirth", "Skins", "Quests", "Zones", "Leaderboard", "Admin",
-		"Codes", "Shop", "Rewards", "UpdateLog" }
+		"Codes", "Shop", "Rewards", "UpdateLog", "Settings" }
 	for index, name in ipairs(menuNames) do
 		start(name, menus)
 		run(name, function(m) m.Init(Client) end)
@@ -8147,6 +8187,8 @@ local function bootUi()
 	run("DeathScreen", function(m) m.Init(Client) end)
 	run("VipDoor", function(m) m.Init(Client) end)
 	run("Chat", function(m) m.Init(Client) end)
+	run("KillFeed", function(m) m.Init(Client) end)
+	run("ZoneGuard", function(m) m.Init(Client) end)
 end
 
 -- Preload the map while the loading screen is up, then hand over to the game.
@@ -9605,7 +9647,7 @@ end)
 					</Properties>
 				</Item>
 			</Item>
-				<Item class="Folder" referent="RBX78080384a473bc275eccaa77e30e2032">
+				<Item class="Folder" referent="RBX79b6f5dfef425b94db8df2f5e12c560b">
 					<Properties>
 <Color3 name="IconTint">
 					<R>0</R>
@@ -9619,7 +9661,7 @@ end)
 					<string name="Name">ClientModules</string>
 					<int64 name="SourceAssetId">-1</int64>
 					<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-					<UniqueId name="UniqueId">RBX78080384a473bc275eccaa77e30e2032</UniqueId>
+					<UniqueId name="UniqueId">RBX79b6f5dfef425b94db8df2f5e12c560b</UniqueId>
 					</Properties>
 <Item class="ModuleScript" referent="RBXE84C889525BD4CB585127DC63071ABC8">
 				<Properties>
@@ -9651,6 +9693,7 @@ local layoutConnections = {}
 local viewportSize = nil
 local camera = nil
 local started = false
+local userScale = 1     -- player preference, multiplied into every computed scale
 
 local function rescale(scaleComponent, baseResolution)
 	if not viewportSize or not baseResolution then return end
@@ -9660,7 +9703,7 @@ local function rescale(scaleComponent, baseResolution)
 	end
 	local ratio = math.max(baseResolution.X / viewportSize.X, baseResolution.Y / viewportSize.Y)
 	if ratio <= 0 then return end
-	scaleComponent.Scale = 1 / ratio
+	scaleComponent.Scale = userScale / ratio
 end
 
 local function rescaleAll()
@@ -9719,6 +9762,14 @@ local function registerLayout(layout)
 	syncCanvas(layout, scaleComponent)
 end
 
+-- Interface scale from the Settings menu. It multiplies the resolution-derived
+-- scale instead of replacing it, so a small screen and a small preference combine
+-- rather than fighting.
+function UiScaler.SetUserScale(scale)
+	userScale = math.clamp(tonumber(scale) or 1, 0.5, 2)
+	if started then rescaleAll() end
+end
+
 function UiScaler.Init(client)
 	if started then return true end
 	started = true
@@ -9743,6 +9794,9 @@ function UiScaler.Init(client)
 	for _, layout in ipairs(CollectionService:GetTagged(LAYOUT_TAG)) do
 		registerLayout(layout)
 	end
+
+	UiScaler.SetUserScale(client.Prefs and client.Prefs.UiScale)
+	client.onPref("UiScale", function(value) UiScaler.SetUserScale(value) end)
 
 	-- The camera can be missing this early (ReplicatedFirst); rescaleAll() looks
 	-- it up again, and ViewportSize changes re-run it anyway.
@@ -11046,6 +11100,31 @@ local MUSIC_VOLUME = 0.7
 local player
 local buttonsGui, currencyGui
 
+-- Music state lives at module scope so the Settings menu and the mute button can
+-- both change it without stepping on each other: volume is a preference, mute is
+-- a click, and the effective volume is the product of the two.
+local musicSound, musicIcon
+local musicMuted = false
+local musicVolume = MUSIC_VOLUME
+
+local function applyMusic()
+	if not musicSound or not musicSound.Parent then
+		local folder = workspace:FindFirstChild("MusicFolder")
+		musicSound = folder and folder:FindFirstChild("Music")
+	end
+	if musicSound and musicSound:IsA("Sound") then
+		musicSound.Volume = musicMuted and 0 or musicVolume
+	end
+	if musicIcon then
+		musicIcon.Image = musicMuted and MUSIC_OFF_IMAGE or MUSIC_ON_IMAGE
+	end
+end
+
+function Hud.SetMusicVolume(volume)
+	musicVolume = math.clamp(tonumber(volume) or MUSIC_VOLUME, 0, 1)
+	applyMusic()
+end
+
 -- Resolve "A/B/C" inside a container without exploding on a missing link.
 local function resolve(root, path)
 	local current = root
@@ -11231,8 +11310,7 @@ local function hookMusic()
 	if not button then return end
 	UiModule.Animate(button)
 
-	local icon = button:FindFirstChild("ImageLabel")
-	local muted = false
+	musicIcon = button:FindFirstChild("ImageLabel")
 
 	button.MouseButton1Click:Connect(function()
 		-- workspace.MusicFolder/Music may not exist (or may not have replicated
@@ -11244,9 +11322,9 @@ local function hookMusic()
 			return
 		end
 
-		muted = not muted
-		music.Volume = muted and 0 or MUSIC_VOLUME
-		if icon then icon.Image = muted and MUSIC_OFF_IMAGE or MUSIC_ON_IMAGE end
+		musicSound = music
+		musicMuted = not musicMuted
+		applyMusic()
 	end)
 end
 
@@ -11384,6 +11462,10 @@ function Hud.Init(client)
 	hookSocial()
 	hookStore()
 	hookRewardsNudge()
+
+	-- Volume is a preference; the mute button above stays independent of it.
+	Hud.SetMusicVolume(client.Prefs and client.Prefs.MusicVolume)
+	client.onPref("MusicVolume", function(value) Hud.SetMusicVolume(value) end)
 
 	return true
 end
@@ -11630,16 +11712,36 @@ local PUNCH_COOLDOWN = 0.4
 local camera
 local punching = false
 local lastPunch = 0
+local punchEnabled = true
+local motionEnabled = true
+
+-- Both are player preferences (GameData/Prefs). Reduced motion is the wider one:
+-- it kills the fov kick and makes every transition this module owns instant.
+function Camera.SetPunchEnabled(on)
+	punchEnabled = on ~= false
+end
+
+function Camera.SetMotionEnabled(on)
+	motionEnabled = on ~= false
+	if not motionEnabled and camera then
+		camera.FieldOfView = BASE_FOV
+	end
+end
 
 function Camera.setFov(fov, time)
 	if not camera then return end
+	fov = tonumber(fov) or BASE_FOV
+	if not motionEnabled then
+		camera.FieldOfView = fov
+		return
+	end
 	TweenService:Create(camera, TweenInfo.new(time or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		FieldOfView = tonumber(fov) or BASE_FOV,
+		FieldOfView = fov,
 	}):Play()
 end
 
 function Camera.punch(amount)
-	if not camera or punching then return end
+	if not camera or punching or not punchEnabled or not motionEnabled then return end
 	local now = os.clock()
 	if now - lastPunch < PUNCH_COOLDOWN then return end
 	lastPunch = now
@@ -11666,6 +11768,13 @@ function Camera.Init(client)
 	end
 
 	local player = client and client.Player or Players.LocalPlayer
+
+	-- Preferences before anything can punch: Client.Prefs already holds the
+	-- defaults at this point, and the listeners pick up the saved values.
+	Camera.SetPunchEnabled(client.Prefs and client.Prefs.CameraPunch)
+	Camera.SetMotionEnabled(not (client.Prefs and client.Prefs.ReducedMotion))
+	client.onPref("CameraPunch", function(value) Camera.SetPunchEnabled(value) end)
+	client.onPref("ReducedMotion", function(value) Camera.SetMotionEnabled(not value) end)
 
 	camera.CameraType = Enum.CameraType.Custom
 	camera.FieldOfView = BASE_FOV
@@ -11928,7 +12037,254 @@ return CoreGui
 						<string name="ScriptGuid">{7BCF358E-C06D-4938-A36D-D0171AE1BCA1}</string>
 						</Properties>
 					</Item>
-					<Item class="Folder" referent="RBXcd0110ca317c1f3ed9fe4744ef82576d">
+					<Item class="ModuleScript" referent="RBX3de2119f70fee102ed5bb9921069fb2d">
+						<Properties>
+						<ProtectedString name="Source"><![CDATA[-- Kill feed: who ate whom, top centre of the screen.
+--
+-- Presentation only. The server reports the fact through Events.KillFeed with the
+-- two names and the size the killer absorbed; whether it is shown at all is a
+-- player preference (GameData/Prefs/KillFeed), and the strip itself is an asset
+-- (StarterGui/KillFeed) so its position, colours and row height are Studio edits.
+local KillFeed = {}
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local GameConfig = require(ReplicatedStorage.Modules:WaitForChild("GameConfig"))
+local UiModule = require(ReplicatedStorage:WaitForChild("UiModule"))
+
+local MAX = tonumber(GameConfig.get("KillFeedMax", 5)) or 5
+local LIFETIME = tonumber(GameConfig.get("KillFeedLifetime", 6)) or 6
+local FADE = 0.4
+
+local client, entries, template
+local enabled = true
+local order = 0
+
+local function liveRows()
+	local rows = {}
+	for _, child in ipairs(entries:GetChildren()) do
+		if child.Name == "Kill" then
+			table.insert(rows, child)
+		end
+	end
+	table.sort(rows, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+	return rows
+end
+
+-- Oldest first: the strip has a fixed height and a busy server would otherwise
+-- push rows off the bottom of it.
+local function trim()
+	local rows = liveRows()
+	while #rows > MAX do
+		local oldest = table.remove(rows, 1)
+		oldest:Destroy()
+	end
+end
+
+local function push(text)
+	if not enabled or not entries or not template then return end
+
+	order += 1
+	local row = template:Clone()
+	row.Name = "Kill"
+	row.Text = text
+	row.LayoutOrder = order
+	row.BackgroundTransparency = 0.2
+	row.TextTransparency = 0
+	row.Visible = true
+	row.Parent = entries
+	trim()
+
+	task.delay(LIFETIME, function()
+		if not row.Parent then return end
+		local fade = TweenService:Create(row, TweenInfo.new(FADE, Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out), { BackgroundTransparency = 1, TextTransparency = 1 })
+		fade:Play()
+		fade.Completed:Connect(function()
+			if row.Parent then row:Destroy() end
+		end)
+	end)
+end
+
+function KillFeed.SetEnabled(on)
+	enabled = on ~= false
+	if not enabled and entries then
+		for _, row in ipairs(liveRows()) do
+			row:Destroy()
+		end
+	end
+end
+
+function KillFeed.Init(c)
+	client = c
+
+	local gui = client.gui("KillFeed")
+	entries = gui and gui:FindFirstChild("Entries")
+	template = entries and entries:FindFirstChild("Entry")
+	if not entries or not template then
+		warn("[KillFeed] StarterGui/KillFeed is missing from the place - kill feed disabled")
+		return false
+	end
+	template.Visible = false
+
+	-- Honour the preference immediately (defaults are applied before any module
+	-- starts) and whenever it changes.
+	KillFeed.SetEnabled(client.Prefs and client.Prefs.KillFeed)
+	client.onPref("KillFeed", function(value)
+		KillFeed.SetEnabled(value)
+	end)
+
+	client.on("KillFeed", function(killer, victim, absorbed)
+		if typeof(killer) ~= "string" or typeof(victim) ~= "string" then return end
+		absorbed = tonumber(absorbed) or 0
+
+		local text = ('<b>%s</b> ate <b>%s</b>'):format(killer, victim)
+		if absorbed > 0 then
+			text = text .. ('   <font color="rgb(140,235,160)">+%s</font>'):format(UiModule.Format(absorbed))
+		end
+		push(text)
+	end)
+
+	return true
+end
+
+return KillFeed
+]]></ProtectedString>
+						<Content name="LinkedSource"><null></null></Content>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">KillFeed</string>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+						<UniqueId name="UniqueId">RBX3de2119f70fee102ed5bb9921069fb2d</UniqueId>
+						<string name="ScriptGuid">{81FB5150-D1BA-434A-A02A-9BCE25539521}</string>
+						</Properties>
+					</Item>
+					<Item class="ModuleScript" referent="RBX3604273b247fe5c4702d22b320316bda">
+						<Properties>
+						<ProtectedString name="Source"><![CDATA[-- Locked zone warning: a red edge plus the reason, while the player is standing
+-- in a zone they have not unlocked.
+--
+-- The server already refuses the food and the teleport. This exists so the gate
+-- does not feel arbitrary: the dais sign states the requirement, and standing on
+-- the dais says the same thing in the middle of the screen. Both the tint and the
+-- label are asset (StarterGui/ZoneWarn), so the look is a Studio edit.
+local ZoneGuard = {}
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local GameConfig = require(ReplicatedStorage.Modules:WaitForChild("GameConfig"))
+
+local CHECK_INTERVAL = 0.4
+
+local client, player, tint, label
+local showing -- name of the zone being warned about, or nil
+
+local function sizeValue()
+	local stats = player:FindFirstChild("leaderstats")
+	local size = stats and stats:FindFirstChild("Size")
+	return size and size.Value or 0
+end
+
+-- Name of the zone a position is inside plus why it is locked ("" when open).
+-- The VIP wing is a pseudo-zone, so it is tested by region rather than radius.
+local function zoneAt(position)
+	for _, zone in ipairs(GameConfig.zones()) do
+		local dx = position.X - zone.center[1]
+		local dz = position.Z - zone.center[3]
+		if (dx * dx + dz * dz) <= (zone.radius * zone.radius) then
+			return zone.name, GameConfig.zoneLockReason(zone, sizeValue(),
+				player:GetAttribute("Rebirths") or 0)
+		end
+	end
+
+	local region = GameConfig.VIP.Region
+	if position.X >= region.minX and position.X <= region.maxX
+		and position.Z >= region.minZ and position.Z <= region.maxZ then
+		if player:GetAttribute("VIP") then
+			return "VIP wing", ""
+		end
+		return "VIP wing", "VIP gamepass required"
+	end
+
+	return nil, ""
+end
+
+local function hide()
+	if not showing then return end
+	showing = nil
+	if tint then tint.Visible = false end
+end
+
+local function show(name, reason)
+	local isNew = showing ~= name
+	showing = name
+	if tint then tint.Visible = true end
+	if label then label.Text = ("%s: %s"):format(name, reason) end
+	-- Toast only on the way in: repeating it every check would bury the feed.
+	if isNew then
+		client.Notify(("%s is locked - %s"):format(name, reason), "bad")
+	end
+end
+
+function ZoneGuard.Init(c)
+	client = c
+	player = c.Player
+
+	local gui = client.gui("ZoneWarn")
+	tint = gui and gui:FindFirstChild("Tint")
+	label = tint and tint:FindFirstChild("Label")
+	if not tint then
+		warn("[ZoneGuard] StarterGui/ZoneWarn is missing from the place - warning disabled")
+		return false
+	end
+	tint.Visible = false
+
+	task.spawn(function()
+		while player.Parent do
+			task.wait(CHECK_INTERVAL)
+
+			local character = player.Character
+			local root = character and (character.PrimaryPart
+				or character:FindFirstChild("HumanoidRootPart"))
+			if not root or player:GetAttribute("Dead") then
+				hide()
+				continue
+			end
+
+			-- Requirements are re-read every tick, so unlocking while standing on
+			-- the dais (a rebirth, a size milestone, buying VIP) clears the warning
+			-- without the player having to step off.
+			local name, reason = zoneAt(root.Position)
+			if name and reason ~= "" then
+				show(name, reason)
+			else
+				hide()
+			end
+		end
+	end)
+
+	return true
+end
+
+return ZoneGuard
+]]></ProtectedString>
+						<Content name="LinkedSource"><null></null></Content>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">ZoneGuard</string>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+						<UniqueId name="UniqueId">RBX3604273b247fe5c4702d22b320316bda</UniqueId>
+						<string name="ScriptGuid">{9D530F68-E6EC-4D82-B56F-6B321E4321B4}</string>
+						</Properties>
+					</Item>
+					<Item class="Folder" referent="RBX404849ff6fa36c44d3992f667f61463c">
 						<Properties>
 <Color3 name="IconTint">
 					<R>0</R>
@@ -11942,9 +12298,9 @@ return CoreGui
 						<string name="Name">Menus</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBXcd0110ca317c1f3ed9fe4744ef82576d</UniqueId>
+						<UniqueId name="UniqueId">RBX404849ff6fa36c44d3992f667f61463c</UniqueId>
 						</Properties>
-					<Item class="ModuleScript" referent="RBX3de2119f70fee102ed5bb9921069fb2d">
+					<Item class="ModuleScript" referent="RBX6367f896b756f10ef0e827bb16860fda">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Menu wiring. Every button in StarterGui.Buttons whose name matches a frame in
 -- StarterGui.Frames toggles that frame (the convention the old ButtonEffects
@@ -12092,6 +12448,18 @@ function MenuUi.addRow(frame, opts)
 	local sub = row:FindFirstChild("Subtitle")
 	if sub then sub.Text = tostring(opts.sub or "") end
 
+	-- Optional progress bar, shipped hidden inside RowTemplate. Quests uses it;
+	-- a fraction keeps the caller out of the layout's business.
+	local barFrame = row:FindFirstChild("Bar")
+	if barFrame and opts.bar ~= nil then
+		barFrame.Visible = true
+		local fill = barFrame:FindFirstChild("Fill")
+		if fill then
+			fill.Size = UDim2.fromScale(math.clamp(tonumber(opts.bar) or 0, 0, 1), 1)
+			if opts.barColor then fill.BackgroundColor3 = opts.barColor end
+		end
+	end
+
 	if opts.accent then
 		local stroke = row:FindFirstChildOfClass("UIStroke")
 		if stroke then stroke.Color = opts.accent end
@@ -12197,11 +12565,11 @@ return MenuUi
 						<string name="Name">MenuUi</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX3de2119f70fee102ed5bb9921069fb2d</UniqueId>
-						<string name="ScriptGuid">{81FB5150-D1BA-434A-A02A-9BCE25539521}</string>
+						<UniqueId name="UniqueId">RBX6367f896b756f10ef0e827bb16860fda</UniqueId>
+						<string name="ScriptGuid">{8FB8360C-5FD3-446A-8CD6-4185976A933A}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX3604273b247fe5c4702d22b320316bda">
+					<Item class="ModuleScript" referent="RBX10a5d94135c24f3ea75c1df35fbf91c0">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Rebirth menu. Numbers come from GameData/Settings (RebirthBase, RebirthExponent,
 -- RebirthAdd, RebirthMultStep, RebirthCashPerLevel) so tuning is a Studio edit.
@@ -12328,11 +12696,11 @@ return Rebirth
 						<string name="Name">Rebirth</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX3604273b247fe5c4702d22b320316bda</UniqueId>
-						<string name="ScriptGuid">{9D530F68-E6EC-4D82-B56F-6B321E4321B4}</string>
+						<UniqueId name="UniqueId">RBX10a5d94135c24f3ea75c1df35fbf91c0</UniqueId>
+						<string name="ScriptGuid">{F6131BEB-1213-448A-9916-528A5F63625A}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX6367f896b756f10ef0e827bb16860fda">
+					<Item class="ModuleScript" referent="RBX20b1d0720b3aefe0a854fc938b8e2edf">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Skins menu. The catalogue is GameData/Skins (Color, Unlock, Req, Order) and
 -- ownership comes from the server through Events.SkinList, so nothing here can
@@ -12488,11 +12856,11 @@ return Skins
 						<string name="Name">Skins</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX6367f896b756f10ef0e827bb16860fda</UniqueId>
-						<string name="ScriptGuid">{8FB8360C-5FD3-446A-8CD6-4185976A933A}</string>
+						<UniqueId name="UniqueId">RBX20b1d0720b3aefe0a854fc938b8e2edf</UniqueId>
+						<string name="ScriptGuid">{6798D9E6-006F-4550-92C3-6D64E84DD7CE}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX10a5d94135c24f3ea75c1df35fbf91c0">
+					<Item class="ModuleScript" referent="RBX42811ff7a0865d535ceee4c78617112c">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Daily quests. The list is GameData/Quests (Type, Goal, RewardCash,
 -- RewardSkin, Text, Order); progress and claims come from the server through
@@ -12508,15 +12876,24 @@ local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
 local FRAME_NAME = "Quests"
 local READY = Color3.fromRGB(110, 220, 140)
 local CLAIMED = Color3.fromRGB(150, 160, 185)
-local BAR_WIDTH = 12
-
 local client, frame
 local progress = {}   -- quest id -> { progress, claimed }
+local statusLabel, claimAll
 
-local function bar(current, goal)
-	if goal <= 0 then return "" end
-	local filled = math.clamp(math.floor((current / goal) * BAR_WIDTH + 0.5), 0, BAR_WIDTH)
-	return string.rep("|", filled) .. string.rep(".", BAR_WIDTH - filled)
+-- The server resets dailies on the UTC day, so the countdown is pure client
+-- arithmetic: no remote, and it cannot disagree with the reset.
+local function countdownText()
+	local left = 86400 - (os.time() % 86400)
+	return ("Resets in %dh %02dm"):format(math.floor(left / 3600), math.floor((left % 3600) / 60))
+end
+
+local function readyCount()
+	local count = 0
+	for _, quest in ipairs(GameConfig.QUESTS) do
+		local entry = progress[quest.id]
+		if entry and not entry.claimed and entry.progress >= quest.goal then count += 1 end
+	end
+	return count
 end
 
 local function refresh()
@@ -12542,10 +12919,12 @@ local function refresh()
 
 		MenuUi.addRow(frame, {
 			info = entry.claimed and ('<font color="rgb(150,160,185)">%s</font>'):format(quest.text) or quest.text,
-			sub = ("%s %d/%d   |   %s   |   %s"):format(
-				bar(current, quest.goal), current, quest.goal,
+			sub = ("%d/%d   |   %s   |   %s"):format(
+				current, quest.goal,
 				entry.claimed and "CLAIMED" or (ready and "TAP TO CLAIM" or "In progress"),
 				table.concat(rewards, ", ")),
+			bar = quest.goal > 0 and (current / quest.goal) or 1,
+			barColor = entry.claimed and CLAIMED or READY,
 			accent = entry.claimed and CLAIMED or (ready and READY or nil),
 			onClick = ready and function()
 				client.fire("QuestClaim", quest.id)
@@ -12554,6 +12933,13 @@ local function refresh()
 	end
 
 	MenuUi.addSection(frame, ("Daily quests   |   %d of %d claimed"):format(done, total), 0)
+
+	if statusLabel then statusLabel.Text = countdownText() end
+	if claimAll then
+		local ready = readyCount()
+		claimAll.Text = ready > 0 and ("Claim All (%d)"):format(ready) or "Claim All"
+		claimAll.AutoButtonColor = ready > 0
+	end
 end
 Quests.refresh = refresh
 
@@ -12561,6 +12947,17 @@ function Quests.Init(c)
 	client = c
 	frame = MenuUi.frame(FRAME_NAME)
 	if not frame then return false end
+
+	statusLabel = frame:FindFirstChild("Status")
+	claimAll = frame:FindFirstChild("ClaimAll")
+	if claimAll then
+		UiModule.Animate(claimAll)
+		claimAll.Activated:Connect(function()
+			-- One remote for the lot: the server claims through the same path as a
+			-- single claim, so nothing here can double-pay.
+			if readyCount() > 0 then client.fire("QuestClaimAll") end
+		end)
+	end
 
 	MenuUi.Register(FRAME_NAME, {
 		onOpen = function()
@@ -12570,6 +12967,22 @@ function Quests.Init(c)
 			refresh()
 		end,
 	})
+
+	client.on("QuestClaimAll", function(count)
+		count = tonumber(count) or 0
+		client.Notify(count > 0 and ("Claimed %d quest reward%s.")
+			:format(count, count == 1 and "" or "s") or "Nothing ready to claim.",
+			count > 0 and "good" or "info")
+		refresh()
+	end)
+
+	-- Only worth ticking while the menu is actually on screen.
+	task.spawn(function()
+		while frame and frame.Parent do
+			task.wait(20)
+			if frame.Visible and statusLabel then statusLabel.Text = countdownText() end
+		end
+	end)
 
 	client.on("QuestUpdate", function(first, second, third, fourth)
 		if typeof(first) == "table" then
@@ -12602,11 +13015,11 @@ return Quests
 						<string name="Name">Quests</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX10a5d94135c24f3ea75c1df35fbf91c0</UniqueId>
-						<string name="ScriptGuid">{F6131BEB-1213-448A-9916-528A5F63625A}</string>
+						<UniqueId name="UniqueId">RBX42811ff7a0865d535ceee4c78617112c</UniqueId>
+						<string name="ScriptGuid">{51B28086-047D-4F99-8984-2EDF4DC96032}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX20b1d0720b3aefe0a854fc938b8e2edf">
+					<Item class="ModuleScript" referent="RBX7406dcd2213ed10aaefb7e6b111995ae">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Zones menu. The zones ARE the map: each dais in workspace/Zones carries its own
 -- Id, Rarity, ReqSize, ReqRebirth and Color, so moving or retuning a zone in
@@ -12634,9 +13047,9 @@ local function sizeValue()
 end
 
 local function rebirths()
-	-- The server keeps the authoritative count; the menu only needs a best guess
-	-- for the lock text, and it is corrected on the next Rebirth event.
-	return Zones.rebirthCount or 0
+	-- The server mirrors the authoritative count onto an attribute, so the lock
+	-- text is correct on the first open instead of after the first Rebirth event.
+	return player:GetAttribute("Rebirths") or Zones.rebirthCount or 0
 end
 
 local function currentZoneName()
@@ -12668,6 +13081,16 @@ local function refresh()
 
 	local size = sizeValue()
 	local count = rebirths()
+
+	MenuUi.addRow(frame, {
+		info = "Return to the arena",
+		sub = "Leave the zone you are standing in",
+		accent = OPEN,
+		onClick = function()
+			-- Zone 0 is the arena: always allowed, no gate to check.
+			client.fire("ZoneTeleport", 0)
+		end,
+	})
 
 	MenuUi.addSection(frame, "Rarity zones")
 
@@ -12745,6 +13168,12 @@ function Zones.Init(c)
 		end
 	end)
 
+	-- A rebirth can unlock a zone on its own, so the lock text follows the
+	-- attribute rather than waiting for the menu to be reopened.
+	player:GetAttributeChangedSignal("Rebirths"):Connect(function()
+		if frame.Visible then refresh() end
+	end)
+
 	client.on("Rebirth", function(rebirthCount)
 		Zones.rebirthCount = tonumber(rebirthCount) or 0
 		if frame.Visible then refresh() end
@@ -12781,11 +13210,11 @@ return Zones
 						<string name="Name">Zones</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX20b1d0720b3aefe0a854fc938b8e2edf</UniqueId>
-						<string name="ScriptGuid">{6798D9E6-006F-4550-92C3-6D64E84DD7CE}</string>
+						<UniqueId name="UniqueId">RBX7406dcd2213ed10aaefb7e6b111995ae</UniqueId>
+						<string name="ScriptGuid">{DAAA92FF-4541-470C-B66C-5F8AED78F598}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX42811ff7a0865d535ceee4c78617112c">
+					<Item class="ModuleScript" referent="RBXa63a4bf5ff34f3fb358442fa37797ede">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Global leaderboards. The boards are ordered data stores read on the server and
 -- pushed through Events.Leaderboard; this menu only renders the cache and asks
@@ -12877,11 +13306,11 @@ return Leaderboard
 						<string name="Name">Leaderboard</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX42811ff7a0865d535ceee4c78617112c</UniqueId>
-						<string name="ScriptGuid">{51B28086-047D-4F99-8984-2EDF4DC96032}</string>
+						<UniqueId name="UniqueId">RBXa63a4bf5ff34f3fb358442fa37797ede</UniqueId>
+						<string name="ScriptGuid">{5A4E9E95-4CE3-4010-B61D-6341985C6535}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX7406dcd2213ed10aaefb7e6b111995ae">
+					<Item class="ModuleScript" referent="RBX9501e6a9188b01b50d56e7b0f70fb0b6">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Admin console UI: Frames/Admin > CommandBar > {Input (TextBox), Send} plus the
 -- shared List. Everything is validated server side; this is a transcript.
@@ -12973,11 +13402,11 @@ return Admin
 						<string name="Name">Admin</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX7406dcd2213ed10aaefb7e6b111995ae</UniqueId>
-						<string name="ScriptGuid">{DAAA92FF-4541-470C-B66C-5F8AED78F598}</string>
+						<UniqueId name="UniqueId">RBX9501e6a9188b01b50d56e7b0f70fb0b6</UniqueId>
+						<string name="ScriptGuid">{69261C06-7BD7-4B06-91E8-F27CF1DB8947}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBXa63a4bf5ff34f3fb358442fa37797ede">
+					<Item class="ModuleScript" referent="RBX4cf874355273d9e3d45b790120aa0e01">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Codes menu: Frames/Codes > TextBox (+ the hover/pop Sounds that ship with it).
 -- Codes and their cash values live in GameData/Codes; the server validates and
@@ -13051,11 +13480,11 @@ return Codes
 						<string name="Name">Codes</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBXa63a4bf5ff34f3fb358442fa37797ede</UniqueId>
-						<string name="ScriptGuid">{5A4E9E95-4CE3-4010-B61D-6341985C6535}</string>
+						<UniqueId name="UniqueId">RBX4cf874355273d9e3d45b790120aa0e01</UniqueId>
+						<string name="ScriptGuid">{F6A7EEAC-9DBA-4275-B353-7EB56EC26009}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX9501e6a9188b01b50d56e7b0f70fb0b6">
+					<Item class="ModuleScript" referent="RBX9a6202d0a121065a6d1909c437a7e77f">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Shop menu: gamepasses.
 --
@@ -13183,11 +13612,11 @@ return Shop
 						<string name="Name">Shop</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX9501e6a9188b01b50d56e7b0f70fb0b6</UniqueId>
-						<string name="ScriptGuid">{69261C06-7BD7-4B06-91E8-F27CF1DB8947}</string>
+						<UniqueId name="UniqueId">RBX9a6202d0a121065a6d1909c437a7e77f</UniqueId>
+						<string name="ScriptGuid">{92594921-DF50-4095-8AAB-351B023D468E}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX4cf874355273d9e3d45b790120aa0e01">
+					<Item class="ModuleScript" referent="RBXcd0110ca317c1f3ed9fe4744ef82576d">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Playtime rewards menu: Frames/Rewards > Rewards > Reward1..RewardN, each an
 -- ImageButton with Time and Amount labels.
@@ -13342,11 +13771,11 @@ return Rewards
 						<string name="Name">Rewards</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX4cf874355273d9e3d45b790120aa0e01</UniqueId>
-						<string name="ScriptGuid">{F6A7EEAC-9DBA-4275-B353-7EB56EC26009}</string>
+						<UniqueId name="UniqueId">RBXcd0110ca317c1f3ed9fe4744ef82576d</UniqueId>
+						<string name="ScriptGuid">{A426CA59-CD42-4412-8B75-9CC1D388E2DB}</string>
 						</Properties>
 					</Item>
-					<Item class="ModuleScript" referent="RBX9a6202d0a121065a6d1909c437a7e77f">
+					<Item class="ModuleScript" referent="RBX78080384a473bc275eccaa77e30e2032">
 						<Properties>
 						<ProtectedString name="Source"><![CDATA[-- Update log menu: Frames/UpdateLog > ScrollingFrame > template > Main >
 -- {Number, Update}. The entries are GameData/UpdateLog (ordered StringValues), so
@@ -13427,8 +13856,170 @@ return UpdateLog
 						<string name="Name">UpdateLog</string>
 						<int64 name="SourceAssetId">-1</int64>
 						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
-						<UniqueId name="UniqueId">RBX9a6202d0a121065a6d1909c437a7e77f</UniqueId>
-						<string name="ScriptGuid">{92594921-DF50-4095-8AAB-351B023D468E}</string>
+						<UniqueId name="UniqueId">RBX78080384a473bc275eccaa77e30e2032</UniqueId>
+						<string name="ScriptGuid">{CAEB1575-551F-4FC9-BC94-2B8BD398B624}</string>
+						</Properties>
+					</Item>
+					<Item class="ModuleScript" referent="RBX72f96feed4fe0101361219d67ab56747">
+						<Properties>
+						<ProtectedString name="Source"><![CDATA[-- Settings menu. The list of settings is content (GameData/Prefs), so adding a
+-- value there adds a row here with no code. Values are saved to the profile
+-- through Events.SavePrefs and applied live through Client.Prefs, which every
+-- consumer listens to.
+--
+-- Numeric settings cycle through fixed steps instead of using a drag slider: a
+-- slider needs new asset, and cycling is exact with one tap on a touch screen.
+local Settings = {}
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local GameConfig = require(ReplicatedStorage.Modules:WaitForChild("GameConfig"))
+local MenuUi = require(script.Parent:WaitForChild("MenuUi"))
+
+local FRAME_NAME = "Settings"
+
+-- Order and copy. A pref that is not listed still gets a row (labelled with its
+-- key), so new content appears instead of silently disappearing.
+local ORDER = { "MusicVolume", "UiScale", "KillFeed", "CameraPunch", "ReducedMotion", "AutoFarmFlee" }
+local LABELS = {
+	MusicVolume = "Music volume",
+	UiScale = "Interface scale",
+	KillFeed = "Kill feed",
+	CameraPunch = "Camera punch",
+	ReducedMotion = "Reduced motion",
+	AutoFarmFlee = "Auto-farm avoids bigger cubes",
+}
+local HINTS = {
+	MusicVolume = "tap to change",
+	UiScale = "tap to change",
+	KillFeed = "show who ate whom",
+	CameraPunch = "fov kick when you eat a player",
+	ReducedMotion = "no fov kick, menus snap instead of sliding",
+	AutoFarmFlee = "run from a bigger cube instead of farming beside it",
+}
+local STEPS = {
+	MusicVolume = { 0, 0.2, 0.4, 0.6, 0.8, 1 },
+	UiScale = { 0.8, 0.9, 1, 1.1, 1.25, 1.5 },
+}
+
+local client, frame
+
+local function percent(value)
+	return ("%d%%"):format(math.floor((tonumber(value) or 0) * 100 + 0.5))
+end
+
+local function valueText(key, value)
+	if typeof(value) == "boolean" then
+		return value and "ON" or "OFF"
+	end
+	if key == "MusicVolume" or key == "UiScale" then
+		return percent(value)
+	end
+	return tostring(value)
+end
+
+local function sortedKeys()
+	local keys, seen = {}, {}
+	for _, key in ipairs(ORDER) do
+		if GameConfig.PREFS[key] ~= nil then
+			table.insert(keys, key)
+			seen[key] = true
+		end
+	end
+	local extras = {}
+	for key in pairs(GameConfig.PREFS) do
+		if not seen[key] then table.insert(extras, key) end
+	end
+	table.sort(extras)
+	for _, key in ipairs(extras) do
+		table.insert(keys, key)
+	end
+	return keys
+end
+
+local function nextStep(key)
+	local steps = STEPS[key]
+	if not steps then return nil end
+	local current = tonumber(client.Prefs[key]) or 0
+	local at = #steps
+	for index, step in ipairs(steps) do
+		if math.abs(step - current) < 0.001 then
+			at = index
+			break
+		end
+	end
+	return steps[at % #steps + 1]
+end
+
+local function refresh()
+	if not frame or not frame.Visible then return end
+
+	MenuUi.clearList(frame)
+	MenuUi.addSection(frame, "Saved to your profile")
+
+	for index, key in ipairs(sortedKeys()) do
+		MenuUi.addRow(frame, {
+			info = LABELS[key] or key,
+			sub = ("%s   |   %s"):format(valueText(key, client.Prefs[key]), HINTS[key] or "tap to change"),
+			order = index * 10,
+			onClick = function()
+				-- Read the current value at click time: the row outlives the change.
+				local value = client.Prefs[key]
+				if typeof(value) == "boolean" then
+					client.setPref(key, not value)
+				else
+					local step = nextStep(key)
+					if step then client.setPref(key, step) end
+				end
+			end,
+		})
+	end
+
+	MenuUi.addRow(frame, {
+		info = "Reset to defaults",
+		sub = "every setting back to what the place ships with",
+		order = 900,
+		onClick = function()
+			for key, default in pairs(GameConfig.PREFS) do
+				client.setPref(key, default)
+			end
+		end,
+	})
+end
+Settings.refresh = refresh
+
+function Settings.Init(c)
+	client = c
+	frame = MenuUi.frame(FRAME_NAME)
+	if not frame then return false end
+
+	MenuUi.Register(FRAME_NAME, {
+		onOpen = refresh,
+	})
+
+	-- Values change from this menu and from the server echo; either way the rows
+	-- have to show the new value while the menu is open.
+	for key in pairs(GameConfig.PREFS) do
+		client.onPref(key, function()
+			if frame.Visible then refresh() end
+		end)
+	end
+
+	return true
+end
+
+return Settings
+]]></ProtectedString>
+						<Content name="LinkedSource"><null></null></Content>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">Settings</string>
+						<int64 name="SourceAssetId">-1</int64>
+						<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+						<UniqueId name="UniqueId">RBX72f96feed4fe0101361219d67ab56747</UniqueId>
+						<string name="ScriptGuid">{3C4AD1BD-F02E-4500-9DEB-402EAE2BE734}</string>
 						</Properties>
 					</Item>
 					</Item>

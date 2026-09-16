@@ -120,6 +120,44 @@ Client.GameConfig = GameConfig
 Client.Ui = UiModule
 Client.Events = ReplicatedStorage:WaitForChild("Events", 60)
 
+--// ------------------------------------------------------------------ settings
+-- Client preferences: defaults from GameData/Prefs, the player's own values from
+-- their profile. Consumers register a listener instead of being named here, so
+-- adding a setting in Studio needs no change to this file.
+Client.Prefs = GameConfig.mergePrefs(nil)
+local savedPrefs = {}
+local prefListeners = {}
+
+function Client.onPref(key, fn)
+	table.insert(prefListeners, { key = key, fn = fn })
+end
+
+function Client.applyPrefs(prefs)
+	savedPrefs = type(prefs) == "table" and prefs or {}
+	Client.Prefs = GameConfig.mergePrefs(savedPrefs)
+	for _, listener in ipairs(prefListeners) do
+		local ok, err = pcall(listener.fn, Client.Prefs[listener.key], Client.Prefs)
+		if not ok then
+			warn(("[Client] preference listener for %s failed: %s")
+				:format(listener.key, tostring(err)))
+		end
+	end
+end
+
+function Client.setPref(key, value)
+	if GameConfig.PREFS[key] == nil then return end
+	savedPrefs[key] = value
+	Client.fire("SavePrefs", key, value)
+	-- Applied immediately: waiting for the server echo would make a toggle feel
+	-- broken, and the echo only confirms what was stored.
+	Client.applyPrefs(savedPrefs)
+end
+
+Client.on("SavePrefs", function(prefs)
+	Client.applyPrefs(prefs)
+end)
+Client.fire("SavePrefs") -- ask for the saved values; the defaults are already live
+
 if LoadingScreen then
 	LoadingScreen.SetTitle(GameConfig.GAME_NAME)
 	LoadingScreen.SetProgress(0.3, "Reading game data...")
@@ -148,6 +186,8 @@ local Hud = start("Hud")
 local DeathScreen = start("DeathScreen")
 local VipDoor = start("VipDoor")
 local Chat = start("Chat")
+local KillFeed = start("KillFeed")
+local ZoneGuard = start("ZoneGuard")
 local MenuUi = start("MenuUi", menus)
 
 if LoadingScreen then LoadingScreen.SetProgress(0.5, "Building the interface...") end
@@ -162,7 +202,7 @@ local function bootUi()
 	-- Menus first: Hud buttons toggle them, and each menu registers its frame.
 	run("MenuUi", function(m) m.Init(Client) end)
 	local menuNames = { "Rebirth", "Skins", "Quests", "Zones", "Leaderboard", "Admin",
-		"Codes", "Shop", "Rewards", "UpdateLog" }
+		"Codes", "Shop", "Rewards", "UpdateLog", "Settings" }
 	for index, name in ipairs(menuNames) do
 		start(name, menus)
 		run(name, function(m) m.Init(Client) end)
@@ -175,6 +215,8 @@ local function bootUi()
 	run("DeathScreen", function(m) m.Init(Client) end)
 	run("VipDoor", function(m) m.Init(Client) end)
 	run("Chat", function(m) m.Init(Client) end)
+	run("KillFeed", function(m) m.Init(Client) end)
+	run("ZoneGuard", function(m) m.Init(Client) end)
 end
 
 -- Preload the map while the loading screen is up, then hand over to the game.

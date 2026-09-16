@@ -24,9 +24,9 @@ local function sizeValue()
 end
 
 local function rebirths()
-	-- The server keeps the authoritative count; the menu only needs a best guess
-	-- for the lock text, and it is corrected on the next Rebirth event.
-	return Zones.rebirthCount or 0
+	-- The server mirrors the authoritative count onto an attribute, so the lock
+	-- text is correct on the first open instead of after the first Rebirth event.
+	return player:GetAttribute("Rebirths") or Zones.rebirthCount or 0
 end
 
 local function currentZoneName()
@@ -58,6 +58,16 @@ local function refresh()
 
 	local size = sizeValue()
 	local count = rebirths()
+
+	MenuUi.addRow(frame, {
+		info = "Return to the arena",
+		sub = "Leave the zone you are standing in",
+		accent = OPEN,
+		onClick = function()
+			-- Zone 0 is the arena: always allowed, no gate to check.
+			client.fire("ZoneTeleport", 0)
+		end,
+	})
 
 	MenuUi.addSection(frame, "Rarity zones")
 
@@ -133,6 +143,12 @@ function Zones.Init(c)
 		if not allowed and reason and reason ~= "" then
 			client.Notify(("Travel refused: %s"):format(reason), "bad")
 		end
+	end)
+
+	-- A rebirth can unlock a zone on its own, so the lock text follows the
+	-- attribute rather than waiting for the menu to be reopened.
+	player:GetAttributeChangedSignal("Rebirths"):Connect(function()
+		if frame.Visible then refresh() end
 	end)
 
 	client.on("Rebirth", function(rebirthCount)

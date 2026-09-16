@@ -26,6 +26,7 @@ local layoutConnections = {}
 local viewportSize = nil
 local camera = nil
 local started = false
+local userScale = 1     -- player preference, multiplied into every computed scale
 
 local function rescale(scaleComponent, baseResolution)
 	if not viewportSize or not baseResolution then return end
@@ -35,7 +36,7 @@ local function rescale(scaleComponent, baseResolution)
 	end
 	local ratio = math.max(baseResolution.X / viewportSize.X, baseResolution.Y / viewportSize.Y)
 	if ratio <= 0 then return end
-	scaleComponent.Scale = 1 / ratio
+	scaleComponent.Scale = userScale / ratio
 end
 
 local function rescaleAll()
@@ -94,6 +95,14 @@ local function registerLayout(layout)
 	syncCanvas(layout, scaleComponent)
 end
 
+-- Interface scale from the Settings menu. It multiplies the resolution-derived
+-- scale instead of replacing it, so a small screen and a small preference combine
+-- rather than fighting.
+function UiScaler.SetUserScale(scale)
+	userScale = math.clamp(tonumber(scale) or 1, 0.5, 2)
+	if started then rescaleAll() end
+end
+
 function UiScaler.Init(client)
 	if started then return true end
 	started = true
@@ -118,6 +127,9 @@ function UiScaler.Init(client)
 	for _, layout in ipairs(CollectionService:GetTagged(LAYOUT_TAG)) do
 		registerLayout(layout)
 	end
+
+	UiScaler.SetUserScale(client.Prefs and client.Prefs.UiScale)
+	client.onPref("UiScale", function(value) UiScaler.SetUserScale(value) end)
 
 	-- The camera can be missing this early (ReplicatedFirst); rescaleAll() looks
 	-- it up again, and ViewportSize changes re-run it anyway.

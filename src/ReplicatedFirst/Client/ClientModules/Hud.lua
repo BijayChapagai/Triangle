@@ -23,6 +23,31 @@ local MUSIC_VOLUME = 0.7
 local player
 local buttonsGui, currencyGui
 
+-- Music state lives at module scope so the Settings menu and the mute button can
+-- both change it without stepping on each other: volume is a preference, mute is
+-- a click, and the effective volume is the product of the two.
+local musicSound, musicIcon
+local musicMuted = false
+local musicVolume = MUSIC_VOLUME
+
+local function applyMusic()
+	if not musicSound or not musicSound.Parent then
+		local folder = workspace:FindFirstChild("MusicFolder")
+		musicSound = folder and folder:FindFirstChild("Music")
+	end
+	if musicSound and musicSound:IsA("Sound") then
+		musicSound.Volume = musicMuted and 0 or musicVolume
+	end
+	if musicIcon then
+		musicIcon.Image = musicMuted and MUSIC_OFF_IMAGE or MUSIC_ON_IMAGE
+	end
+end
+
+function Hud.SetMusicVolume(volume)
+	musicVolume = math.clamp(tonumber(volume) or MUSIC_VOLUME, 0, 1)
+	applyMusic()
+end
+
 -- Resolve "A/B/C" inside a container without exploding on a missing link.
 local function resolve(root, path)
 	local current = root
@@ -208,8 +233,7 @@ local function hookMusic()
 	if not button then return end
 	UiModule.Animate(button)
 
-	local icon = button:FindFirstChild("ImageLabel")
-	local muted = false
+	musicIcon = button:FindFirstChild("ImageLabel")
 
 	button.MouseButton1Click:Connect(function()
 		-- workspace.MusicFolder/Music may not exist (or may not have replicated
@@ -221,9 +245,9 @@ local function hookMusic()
 			return
 		end
 
-		muted = not muted
-		music.Volume = muted and 0 or MUSIC_VOLUME
-		if icon then icon.Image = muted and MUSIC_OFF_IMAGE or MUSIC_ON_IMAGE end
+		musicSound = music
+		musicMuted = not musicMuted
+		applyMusic()
 	end)
 end
 
@@ -361,6 +385,10 @@ function Hud.Init(client)
 	hookSocial()
 	hookStore()
 	hookRewardsNudge()
+
+	-- Volume is a preference; the mute button above stays independent of it.
+	Hud.SetMusicVolume(client.Prefs and client.Prefs.MusicVolume)
+	client.onPref("MusicVolume", function(value) Hud.SetMusicVolume(value) end)
 
 	return true
 end

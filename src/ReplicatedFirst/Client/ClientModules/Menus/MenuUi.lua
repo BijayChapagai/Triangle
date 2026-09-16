@@ -144,6 +144,18 @@ function MenuUi.addRow(frame, opts)
 	local sub = row:FindFirstChild("Subtitle")
 	if sub then sub.Text = tostring(opts.sub or "") end
 
+	-- Optional progress bar, shipped hidden inside RowTemplate. Quests uses it;
+	-- a fraction keeps the caller out of the layout's business.
+	local barFrame = row:FindFirstChild("Bar")
+	if barFrame and opts.bar ~= nil then
+		barFrame.Visible = true
+		local fill = barFrame:FindFirstChild("Fill")
+		if fill then
+			fill.Size = UDim2.fromScale(math.clamp(tonumber(opts.bar) or 0, 0, 1), 1)
+			if opts.barColor then fill.BackgroundColor3 = opts.barColor end
+		end
+	end
+
 	if opts.accent then
 		local stroke = row:FindFirstChildOfClass("UIStroke")
 		if stroke then stroke.Color = opts.accent end

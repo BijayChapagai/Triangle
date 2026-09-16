@@ -80,10 +80,11 @@ NEW_SERVER_SOURCES = [
 NEW_SHARED_SOURCES = ["GameConfig"]                 # -> ReplicatedStorage/Modules
 NEW_CLIENT_SOURCES = [                              # -> Client/ClientModules
     "LoadingScreen", "Notifier", "Hud", "DeathScreen", "Camera", "Chat", "CoreGui",
+    "KillFeed", "ZoneGuard",
 ]
 NEW_MENU_SOURCES = [                                # -> Client/ClientModules/Menus
     "MenuUi", "Rebirth", "Skins", "Quests", "Zones", "Leaderboard", "Admin",
-    "Codes", "Shop", "Rewards", "UpdateLog",
+    "Codes", "Shop", "Rewards", "UpdateLog", "Settings",
 ]
 
 # Place level properties this architecture depends on: (path, tag, name, value).
