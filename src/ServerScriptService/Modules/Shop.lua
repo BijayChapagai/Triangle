@@ -41,7 +41,9 @@ local KINDS = {
 		for _, other in ipairs(Players:GetPlayers()) do
 			-- Everyone except the buyer: paying to kill yourself is not the product.
 			if other ~= player and not other:GetAttribute("Dead") then
-				local ok = pcall(Characters.OnKill, player, other)
+				-- force: a paid KillAll reaches players who are still in spawn
+				-- protection, otherwise the product silently under-delivers.
+				local ok = pcall(Characters.OnKill, player, other, true)
 				if ok and other:GetAttribute("Dead") then killed += 1 end
 			end
 		end

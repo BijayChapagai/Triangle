@@ -99,6 +99,7 @@ local HELP = table.concat({
 	"god   noclip",
 	"food - live cubes per region   clearfood - destroy them (they regrow)",
 	"say <message> - broadcast to every player",
+	"wipe <player> - delete their save (privacy requests)",
 }, "\n")
 
 local commands = {
@@ -226,6 +227,30 @@ local commands = {
 		local n = Food.Count()
 		Food.Clear()
 		return ("destroyed %d cubes (they regrow automatically)"):format(n)
+	end,
+
+	-- Privacy: a player (or a parent) asking for their data to be deleted. Resets
+	-- the profile to a fresh one, refreshes everything derived from it and respawns
+	-- the cube so the visuals match. Irreversible - the name has to be exact, and
+	-- "me" is not accepted, so it cannot be fired by accident.
+	wipe = function(player, args)
+		local name = args[2]
+		if not name or name == "" or name == "me" then
+			return "usage: wipe <exact player name>"
+		end
+		local target
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p.Name == name then target = p end
+		end
+		if not target then return "no player with that exact name: " .. tostring(name) end
+		if not DataManager.HasProfile(target) then return "their data is not loaded" end
+
+		local ok, reason = DataManager.Wipe(target)
+		if not ok then return "wipe failed: " .. tostring(reason) end
+
+		Progression.InitPlayer(target)
+		Characters.spawnCharacter(target, false)
+		return ("wiped the save of %s (%d)"):format(target.Name, target.UserId)
 	end,
 
 	say = function(player, args)

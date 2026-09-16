@@ -59,6 +59,23 @@ function Progression.setCubeSize(character, target)
 	return v
 end
 
+-- Re-assert the physical cube size, but only when it has actually drifted and no
+-- tween is in flight. Called by Characters' slow heartbeat: the character is
+-- client-owned, so a modified client can resize its own cube and a bigger hitbox
+-- eats more food per second.
+function Progression.assertCubeSize(character, target)
+	if not character then return false end
+	if sizeTweens[character] then return false end
+	local part = character.PrimaryPart or character:FindFirstChild("HumanoidRootPart")
+	if not part then return false end
+
+	local want = math.clamp(target or 1, 0.4, GameConfig.maxCubeSize())
+	if math.abs(part.Size.X - want) < 0.05 then return false end
+
+	Progression.setCubeSize(character, want)
+	return true
+end
+
 function Progression.applySkin(player)
 	local data = DataManager.Data(player)
 	local char = player.Character

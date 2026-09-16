@@ -11,6 +11,7 @@ local Characters = {}
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterPlayer = game:GetService("StarterPlayer")
 
 local GameConfig = require(ReplicatedStorage.Modules:WaitForChild("GameConfig"))
 local DataManager = require(script.Parent:WaitForChild("DataManager"))
@@ -25,6 +26,7 @@ local bindings = {}         -- [player] = { touched, died, sizeChanged }
 local autoFarmThreads = {}  -- [player] = true while the loop is alive
 local autoFarmEnabled = {}  -- [player] = bool
 local lastRespawn = {}      -- [player] = os.clock()
+local protectTokens = {}    -- [player] = spawn protection generation
 
 --// ------------------------------------------------------------------ helpers
 local function getSizeObject(player)
@@ -47,6 +49,37 @@ local function pickSpawn()
 	end
 	if #options == 0 then return CFrame.new(0, 5, 0) end
 	return options[math.random(1, #options)]:GetPivot()
+end
+
+-- WalkSpeed lives in StarterPlayer (an asset property), never in code: the x2
+-- Speed pass doubles whatever the place says the base speed is.
+local function targetWalkSpeed(player)
+	local base = tonumber(StarterPlayer.CharacterWalkSpeed) or 16
+	if player:GetAttribute("2xSpeed") then base *= 2 end
+	return base
+end
+
+-- Spawn protection, in both directions: a protected cube cannot be eaten and
+-- cannot eat anybody, so it is never a free aggression window. It stops spawn
+-- camping from being a strategy and stops a player who just paid to respawn from
+-- being deleted again before they can move.
+-- An attribute rather than a local so the client can show it and Admin can read it.
+local function protect(player, seconds)
+	seconds = tonumber(seconds) or 0
+	local token = (protectTokens[player] or 0) + 1
+	protectTokens[player] = token
+	if seconds <= 0 then
+		player:SetAttribute("SpawnProtected", false)
+		return
+	end
+	player:SetAttribute("SpawnProtected", true)
+	task.delay(seconds, function()
+		-- Only the newest spawn may clear it: respawning twice inside one window
+		-- must not end the second window early.
+		if protectTokens[player] == token then
+			player:SetAttribute("SpawnProtected", false)
+		end
+	end)
 end
 
 local function disconnectAll(player)
@@ -86,6 +119,23 @@ local function newCharacter()
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid.Health = humanoid.MaxHealth
+
+		-- Hygiene. A cube is one part with a welded root, so the avatar states
+		-- below can only produce weird physics (climbing a wall, sitting in
+		-- mid-air, ragdolling on death), and the built-in name tag would double
+		-- up with PlayerDisplay.
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.BreakJointsOnDeath = false -- keep the weld, and the death tween, intact
+		for _, state in ipairs({
+			Enum.HumanoidStateType.Climbing,
+			Enum.HumanoidStateType.FallingDown,
+			Enum.HumanoidStateType.PlatformStanding,
+			Enum.HumanoidStateType.Ragdoll,
+			Enum.HumanoidStateType.Seated,
+			Enum.HumanoidStateType.Swimming,
+		}) do
+			humanoid:SetStateEnabled(state, false)
+		end
 	end
 
 	-- StarterCharacterScripts are copied manually because this game assigns
@@ -122,9 +172,10 @@ local function bindCharacter(player, model)
 	end
 	Progression.applyRankText(player)
 
-	-- Gamepass walkspeed has to be re-applied to every new character.
-	if player:GetAttribute("2xSpeed") and humanoid then
-		humanoid.WalkSpeed *= 2
+	-- Walkspeed comes from the place and has to be re-applied to every new
+	-- character, x2 Speed pass included.
+	if humanoid then
+		humanoid.WalkSpeed = targetWalkSpeed(player)
 	end
 
 	-- Death: hide the cube AND stop it interacting with the world. An invisible
@@ -159,6 +210,9 @@ local function bindCharacter(player, model)
 			-- no-op instead of an "index nil with Size" error.
 			if not DataManager.HasProfile(player) or not DataManager.HasProfile(otherPlayer) then return end
 			if player:GetAttribute("Dead") or otherPlayer:GetAttribute("Dead") then return end
+			if player:GetAttribute("SpawnProtected") or otherPlayer:GetAttribute("SpawnProtected") then
+				return
+			end
 
 			local otherCharacter = otherPlayer.Character
 			if not otherCharacter then return end
@@ -213,12 +267,38 @@ local function bindCharacter(player, model)
 	end
 
 	player:SetAttribute("Dead", humanoid ~= nil and humanoid.Health <= 0)
+
+	-- Slow re-assert. The character is client-owned, so a modified client can
+	-- change its own WalkSpeed or resize its own cube. Neither can win a fight
+	-- (kills compare server-side leaderstats.Size), but a bigger hitbox sweeps up
+	-- more food per second and a faster cube makes the x2 Speed pass worthless.
+	-- One pass every couple of seconds costs nothing and closes both.
+	local interval = tonumber(GameConfig.get("HeartbeatInterval", 2)) or 2
+	task.spawn(function()
+		while bindings[player] == b do
+			task.wait(interval)
+			if bindings[player] ~= b or not player.Parent then break end
+			local hum = model:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				local want = targetWalkSpeed(player)
+				if hum.WalkSpeed ~= want then hum.WalkSpeed = want end
+			end
+			Progression.assertCubeSize(model, GameConfig.visualSize(sizeOf(player)))
+		end
+	end)
 end
 Characters.bindCharacter = bindCharacter
 
 --// --------------------------------------------------------------------- kill
-function Characters.OnKill(killer, victim)
+-- force bypasses spawn protection, which is how the KillAll product reaches a
+-- player who respawned a moment ago. Every other guard still applies.
+function Characters.OnKill(killer, victim, force)
 	if not killer or not victim or killer == victim then return end
+	if not force then
+		if victim:GetAttribute("SpawnProtected") or killer:GetAttribute("SpawnProtected") then
+			return
+		end
+	end
 	local victimCharacter = victim.Character
 	if not victimCharacter then return end
 	local victimHumanoid = victimCharacter:FindFirstChildOfClass("Humanoid")
@@ -257,6 +337,18 @@ local function spawnCharacter(player, keepSize)
 	player.Character = model
 	model.Parent = workspace
 	model:PivotTo(pickSpawn())
+
+	-- Ownership is assigned explicitly: with auto-assignment a freshly spawned
+	-- cube can end up server-owned (rubber-banding for its own player) when
+	-- somebody else happens to be nearest.
+	local root = model.PrimaryPart
+	if root then
+		if not pcall(function() root:SetNetworkOwner(player) end) then
+			pcall(function() root:SetNetworkOwnershipAuto() end)
+		end
+	end
+
+	protect(player, GameConfig.get("SpawnProtection", 3))
 
 	if not keepSize then
 		-- Reset BEFORE the visuals are applied, otherwise the fresh cube is drawn
@@ -402,6 +494,7 @@ function Characters.PlayerRemoving(player)
 	autoFarmEnabled[player] = nil
 	autoFarmThreads[player] = nil
 	lastRespawn[player] = nil
+	protectTokens[player] = nil
 	disconnectAll(player)
 end
 

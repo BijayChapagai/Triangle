@@ -94,6 +94,39 @@ local function runPreReleaseHooks(player)
 	end
 end
 
+-- Saved with the profile so a future change to the data shape can be migrated
+-- instead of silently resetting somebody's progress. Deliberately NOT part of
+-- Template: Reconcile would stamp it onto legacy profiles too, which is exactly
+-- the information a migration needs. Bump the number whenever a step is added
+-- and never reuse one.
+local SCHEMA_VERSION = 1
+DataManager.SCHEMA_VERSION = SCHEMA_VERSION
+
+-- MIGRATIONS[n] upgrades a profile from version n to n + 1. Steps run in order,
+-- each one pcall-wrapped: a broken migration must not lock a player out of their
+-- save.
+local MIGRATIONS = {
+	-- [1] = function(data) data.SomethingNew = data.SomethingNew or 0 end,
+}
+
+local function migrate(data)
+	local version = tonumber(data.SchemaVersion) or 0
+	while version < SCHEMA_VERSION do
+		local step = MIGRATIONS[version]
+		if step then
+			local ok, err = pcall(step, data)
+			if not ok then
+				warn(("[DataManager] migration %d -> %d failed: %s")
+					:format(version, version + 1, tostring(err)))
+			end
+		end
+		version += 1
+	end
+	data.SchemaVersion = SCHEMA_VERSION
+	return data
+end
+DataManager.migrate = migrate
+
 local function harden(data)
 	data.Cash = tonumber(data.Cash) or 0
 	data.Rebirths = tonumber(data.Rebirths) or 0
@@ -141,6 +174,7 @@ local function onPlayerAdded(player)
 	end
 
 	DataManager.Profiles[player] = profile
+	migrate(profile.Data)
 	harden(profile.Data)
 
 	local leaderstats = Instance.new("Folder")
@@ -160,6 +194,31 @@ local function onPlayerAdded(player)
 
 	-- Last: everything else waits on this flag (characters, menus, progression).
 	player:SetAttribute("DataLoaded", true)
+end
+
+-- Privacy / support: reset a profile to a brand new one and let it save through
+-- the normal ProfileService flow. This is the "delete my data" path - it keeps
+-- the session lock, so it cannot race a release, and it repairs the live
+-- leaderstats so the HUD does not keep showing the old numbers.
+function DataManager.Wipe(player)
+	local profile = DataManager.Profiles[player]
+	if not profile then return false, "no data loaded" end
+
+	local data = profile.Data
+	for key in pairs(data) do
+		data[key] = nil
+	end
+	migrate(data)
+	harden(data)
+	data.WipedAt = os.time()
+
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local cash = leaderstats and leaderstats:FindFirstChild("Cash")
+	if cash then cash.Value = data.Cash end
+	local size = leaderstats and leaderstats:FindFirstChild("Size")
+	if size then size.Value = 0 end
+
+	return true
 end
 
 local function onPlayerRemoving(player)
