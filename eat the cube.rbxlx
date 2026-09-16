@@ -48916,6 +48916,43 @@ if logFolder then
 end
 GameConfig.UPDATELOG = UPDATELOG
 
+--// -------------------------------------------------------------------- prefs
+-- Defaults for the client settings menu (GameData/Prefs). A player's own values
+-- live in their profile under Data.Prefs; these are what a fresh profile starts
+-- from, and they stay editable in Studio like every other content.
+local PREFS = {}
+local prefsFolder = want(GameData, "Prefs")
+if prefsFolder then
+	for _, entry in ipairs(prefsFolder:GetChildren()) do
+		if entry:IsA("BoolValue") then
+			PREFS[entry.Name] = entry.Value == true
+		elseif entry:IsA("NumberValue") or entry:IsA("IntValue") then
+			PREFS[entry.Name] = tonumber(entry.Value) or 0
+		elseif entry:IsA("StringValue") then
+			PREFS[entry.Name] = tostring(entry.Value)
+		end
+	end
+end
+GameConfig.PREFS = PREFS
+
+-- Merge saved prefs over the defaults. Unknown keys are dropped and a value whose
+-- type does not match the default is replaced, so neither a stale profile nor a
+-- tampered client can invent settings. Used by both the server and the client.
+function GameConfig.mergePrefs(saved)
+	local out = {}
+	local hasSaved = type(saved) == "table"
+	for key, default in pairs(PREFS) do
+				local value = nil
+		if hasSaved then value = saved[key] end
+		if typeof(value) == typeof(default) then
+			out[key] = value
+		else
+			out[key] = default
+		end
+	end
+	return out
+end
+
 --// -------------------------------------------------------------------- codes
 local CODES = {}
 local codesFolder = want(GameData, "Codes")
@@ -53575,6 +53612,10 @@ local function harden(data)
 	if type(data.Receipts) ~= "table" then data.Receipts = {} end
 	if type(data.Gifts) ~= "table" then data.Gifts = {} end
 	if type(data.Stats) ~= "table" then data.Stats = { Eaten = 0, Kills = 0, PlayTime = 0 } end
+	-- Client settings, validated against GameData/Prefs on write. LastZone is where
+	-- the player was standing, so a respawn puts them back there.
+	if type(data.Prefs) ~= "table" then data.Prefs = {} end
+	data.LastZone = tonumber(data.LastZone) or 0
 	return data
 end
 
@@ -56310,6 +56351,27 @@ function PlayerModule.Init()
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
 
+	-- Client settings. Fired with no key to fetch, with a key to save. Keys and
+	-- types are validated against GameData/Prefs, so neither a stale profile nor a
+	-- modified client can invent settings or write arbitrary values.
+	Remotes.onServer("SavePrefs", function(player, key, value)
+		local data = DataManager.Data(player)
+		if not data then return end
+
+		if key == nil then
+			Remotes.toClient(player, "SavePrefs", GameConfig.mergePrefs(data.Prefs))
+			return
+		end
+
+		if typeof(key) ~= "string" then return end
+		local default = GameConfig.PREFS[key]
+		if default == nil or typeof(value) ~= typeof(default) then return end
+
+		data.Prefs = data.Prefs or {}
+		data.Prefs[key] = value
+		Remotes.toClient(player, "SavePrefs", GameConfig.mergePrefs(data.Prefs))
+	end)
+
 	-- Buying a pass mid-session applies immediately instead of on the next rejoin.
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, purchased)
 		if not purchased then return end
@@ -56318,7 +56380,9 @@ function PlayerModule.Init()
 				player:SetAttribute(attribute, true)
 				if kind == "speed" then
 					local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-					if humanoid then humanoid.WalkSpeed *= 2 end
+					-- Through Characters so a mid-session purchase and a fresh spawn
+					-- cannot disagree (doubling an already doubled speed).
+					if humanoid then humanoid.WalkSpeed = Characters.targetWalkSpeed(player) end
 				elseif kind == "vip" then
 					Progression.notify(player, "VIP unlocked: the VIP wing and its rare food are yours.", "good")
 				else
@@ -56366,7 +56430,6 @@ local Remotes = require(script.Parent:WaitForChild("Remotes"))
 local Progression = require(script.Parent:WaitForChild("Progression"))
 
 local CharacterTemplate = ServerStorage:WaitForChild("Character")
-local SpawnsFolder = workspace:WaitForChild("Spawns")
 
 -- Per-player runtime state that must not leak across respawns or leaves.
 local bindings = {}         -- [player] = { touched, died, sizeChanged }
@@ -56387,17 +56450,6 @@ local function sizeOf(player)
 end
 Characters.sizeOf = sizeOf
 
-local function pickSpawn()
-	local options = {}
-	for _, spawn in ipairs(SpawnsFolder:GetChildren()) do
-		if spawn:IsA("BasePart") then
-			table.insert(options, spawn)
-		end
-	end
-	if #options == 0 then return CFrame.new(0, 5, 0) end
-	return options[math.random(1, #options)]:GetPivot()
-end
-
 -- WalkSpeed lives in StarterPlayer (an asset property), never in code: the x2
 -- Speed pass doubles whatever the place says the base speed is.
 local function targetWalkSpeed(player)
@@ -56405,6 +56457,7 @@ local function targetWalkSpeed(player)
 	if player:GetAttribute("2xSpeed") then base *= 2 end
 	return base
 end
+Characters.targetWalkSpeed = targetWalkSpeed
 
 -- Spawn protection, in both directions: a protected cube cannot be eaten and
 -- cannot eat anybody, so it is never a free aggression window. It stops spawn
@@ -56674,6 +56727,10 @@ function Characters.OnKill(killer, victim, force)
 	Progression.notify(killer, absorbed > 0
 		and ("Ate %s   +   %d Size"):format(victim.Name, math.floor(absorbed))
 		or ("Ate %s"):format(victim.Name), "good")
+
+	-- Kill feed: everybody sees who ate whom. The client owns presentation (and
+	-- whether it is shown at all), so this only reports the fact.
+	Remotes.toAllClients("KillFeed", killer.Name, victim.Name, math.floor(absorbed))
 end
 
 --// ------------------------------------------------------------------- spawning
@@ -56683,7 +56740,9 @@ local function spawnCharacter(player, keepSize)
 
 	player.Character = model
 	model.Parent = workspace
-	model:PivotTo(pickSpawn())
+	-- Last zone the player was standing in when they are still allowed there,
+	-- otherwise a random spawn in the arena.
+	model:PivotTo(Progression.respawnPivot(player))
 
 	-- Ownership is assigned explicitly: with auto-assignment a freshly spawned
 	-- cube can end up server-owned (rubber-banding for its own player) when
@@ -56762,6 +56821,46 @@ function Characters.AutoFarm(player, enabled)
 				continue
 			end
 
+			local fleeDistance = tonumber(GameConfig.get("AutoFarmFleeDistance", 70)) or 70
+			local avoidDistance = tonumber(GameConfig.get("AutoFarmAvoidDistance", 45)) or 45
+			local data = DataManager.Data(player)
+			-- Opt-out, stored with the profile so it survives a rejoin and is set
+			-- from the Settings menu like every other preference.
+			local wantsFlee = not data or not data.Prefs or data.Prefs.AutoFarmFlee ~= false
+			local mySize = sizeOf(player)
+
+			-- Bigger cubes near me, collected once per tick: the food scan below
+			-- would otherwise compare 800+ cubes against every player.
+			local threats = {}
+			if wantsFlee then
+				for _, other in ipairs(Players:GetPlayers()) do
+					if other ~= player and not other:GetAttribute("Dead") and sizeOf(other) > mySize then
+						local otherRoot = other.Character and other.Character.PrimaryPart
+						if otherRoot then
+							local distance = (root.Position - otherRoot.Position).Magnitude
+							if distance <= fleeDistance * 3 then
+								table.insert(threats, { position = otherRoot.Position, distance = distance })
+							end
+						end
+					end
+				end
+			end
+
+			local nearest
+			for _, threat in ipairs(threats) do
+				if not nearest or threat.distance < nearest.distance then nearest = threat end
+			end
+			if nearest and nearest.distance <= fleeDistance then
+				-- Run straight away from it and re-evaluate next tick: a fixed
+				-- destination walks into walls and back into the same player.
+				local away = root.Position - nearest.position
+				if away.Magnitude > 0.01 then
+					humanoid:MoveTo(root.Position + away.Unit * fleeDistance)
+				end
+				task.wait(0.4)
+				continue
+			end
+
 			local foodFolder = workspace:FindFirstChild("FoodParts")
 			local closestFood, closestDistance
 			if foodFolder then
@@ -56769,8 +56868,19 @@ function Characters.AutoFarm(player, enabled)
 					if food:IsA("BasePart") and food.CanTouch then
 						local distance = (root.Position - food.Position).Magnitude
 						if not closestDistance or distance < closestDistance then
-							closestDistance = distance
-							closestFood = food
+							-- Food parked next to a bigger cube is bait: walking to it
+							-- is how auto-farm used to feed the server's largest player.
+							local guarded = false
+							for _, threat in ipairs(threats) do
+								if (food.Position - threat.position).Magnitude <= avoidDistance then
+									guarded = true
+									break
+								end
+							end
+							if not guarded then
+								closestDistance = distance
+								closestFood = food
+							end
 						end
 					end
 				end
@@ -57232,6 +57342,7 @@ local Progression = {}
 local Progress = {}          -- [player] = { questId = progress }
 local sizeTweens = {}        -- [character] = Tween
 local lastRebirthRequest = {}
+local lastZoneTeleport = {}   -- [player] = os.clock(), throttles the zone remote
 
 local function dayStamp()
 	return math.floor(os.time() / 86400)
@@ -57402,6 +57513,23 @@ function Progression.CheckSize(player)
 	end
 end
 
+-- Claim every finished, unclaimed quest in one click. Each reward still goes
+-- through ClaimQuest, so nothing can be paid twice or bypass its own checks.
+function Progression.ClaimAllQuests(player)
+	local data = DataManager.Data(player)
+	local prog = Progress[player]
+	if not data or not prog then return 0 end
+
+	local claimed = 0
+	for _, q in ipairs(GameConfig.QUESTS) do
+		if not data.ClaimedQuests[q.id] and (prog[q.id] or 0) >= q.goal then
+			Progression.ClaimQuest(player, q.id)
+			claimed += 1
+		end
+	end
+	return claimed
+end
+
 function Progression.ClaimQuest(player, questId)
 	local data = DataManager.Data(player)
 	local prog = Progress[player]
@@ -57490,6 +57618,45 @@ end
 --// -------------------------------------------------------------------- zones
 -- Shared by the teleport remote AND the food handler: walking into a locked dais
 -- (they have no walls) must not hand out its rarity tier for free.
+-- A random spawn point in the open arena. Lives here (not in Characters) so both
+-- the zone remote and respawning agree on what "the arena" means.
+function Progression.arenaPivot()
+	local spawns = workspace:FindFirstChild("Spawns")
+	local options = {}
+	if spawns then
+		for _, spawn in ipairs(spawns:GetChildren()) do
+			if spawn:IsA("BasePart") then
+				table.insert(options, spawn)
+			end
+		end
+	end
+	if #options == 0 then
+		return CFrame.new(0, GameConfig.MAP.FloorY + 5, 0)
+	end
+	return options[math.random(1, #options)]:GetPivot()
+end
+
+-- Where a fresh cube appears: the zone the player was last standing in, if they
+-- are still allowed there, otherwise a random spawn. Being thrown back to the
+-- arena after every death in a far zone reads as a bug even when it is not one.
+function Progression.respawnPivot(player)
+	local data = DataManager.Data(player)
+	local zoneId = data and tonumber(data.LastZone) or 0
+
+	if zoneId == GameConfig.VIP.ZoneId then
+		if player:GetAttribute("VIP") then
+			return CFrame.new(GameConfig.VIP.Teleport)
+		end
+	elseif zoneId > 0 then
+		local zone = GameConfig.getZone(zoneId)
+		if zone and Progression.CanUseZone(player, zoneId) then
+			return CFrame.new(zone.center[1], zone.topY + 4, zone.center[3])
+		end
+	end
+
+	return Progression.arenaPivot()
+end
+
 function Progression.CanUseZone(player, zoneId)
 	zoneId = tonumber(zoneId) or 0
 	if zoneId <= 0 then return true end
@@ -57507,10 +57674,37 @@ function Progression.CanUseZone(player, zoneId)
 	return true
 end
 
+-- Shared tail for a successful teleport: start the cooldown, remember where the
+-- player ended up (respawning puts them back here) and confirm to the client.
+local function finishTeleport(player, zoneId)
+	lastZoneTeleport[player] = os.clock()
+	local data = DataManager.Data(player)
+	if data then data.LastZone = zoneId end
+	Remotes.toClient(player, "ZoneTeleport", zoneId, true, "")
+end
+
 function Progression.TryZoneTeleport(player, zoneId)
 	if not DataManager.HasProfile(player) then return end
 	zoneId = tonumber(zoneId)
 	if not zoneId then return end
+
+	-- The remote is public and PivotTo is not free: one hop per cooldown.
+	local cooldown = tonumber(GameConfig.get("ZoneTeleportCooldown", 5)) or 5
+	local last = lastZoneTeleport[player]
+	if last and os.clock() - last < cooldown then
+		Remotes.toClient(player, "ZoneTeleport", zoneId, false, "wait a moment")
+		return
+	end
+
+	-- Zone 0 is "back to the arena": always allowed, no gate to check.
+	if zoneId == 0 then
+		local char = player.Character
+		if char and char.PrimaryPart then
+			char:PivotTo(Progression.arenaPivot())
+		end
+		finishTeleport(player, 0)
+		return
+	end
 
 	-- The VIP wing is a pseudo-zone: same gate, different destination.
 	if zoneId == GameConfig.VIP.ZoneId then
@@ -57524,7 +57718,7 @@ function Progression.TryZoneTeleport(player, zoneId)
 		if char and char.PrimaryPart then
 			char:PivotTo(CFrame.new(GameConfig.VIP.Teleport))
 		end
-		Remotes.toClient(player, "ZoneTeleport", zoneId, true, "")
+		finishTeleport(player, zoneId)
 		return
 	end
 
@@ -57543,7 +57737,7 @@ function Progression.TryZoneTeleport(player, zoneId)
 		-- Stand on the dais, clear of the food and other cubes.
 		char:PivotTo(CFrame.new(zone.center[1], zone.topY + 4, zone.center[3]))
 	end
-	Remotes.toClient(player, "ZoneTeleport", zoneId, true, "")
+	finishTeleport(player, zoneId)
 end
 
 --// ------------------------------------------------------------------ rebirth
@@ -57568,6 +57762,8 @@ function Progression.TryRebirth(player)
 
 	data.Rebirths += 1
 	data.RebirthMult = GameConfig.rebirthMultiplier(data.Rebirths)
+	player:SetAttribute("Rebirths", data.Rebirths)
+	player:SetAttribute("RebirthMult", data.RebirthMult)
 
 	-- Grant the cheapest rebirth skin not owned yet, so the order always matches
 	-- the requirements advertised in the Skins menu.
@@ -57639,6 +57835,11 @@ function Progression.InitPlayer(player)
 		data.QuestDay = today
 	end
 
+	-- Mirrored onto the player so the client can evaluate zone gates and draw the
+	-- rebirth HUD without a remote round trip.
+	player:SetAttribute("Rebirths", data.Rebirths or 0)
+	player:SetAttribute("RebirthMult", data.RebirthMult or 1)
+
 	local prog = {}
 	for _, q in ipairs(GameConfig.QUESTS) do
 		prog[q.id] = data.Quests[q.id] or 0
@@ -57674,6 +57875,7 @@ function Progression.PlayerRemoving(player)
 	end
 	Progress[player] = nil
 	lastRebirthRequest[player] = nil
+	lastZoneTeleport[player] = nil
 	Leaderboards.PlayerRemoving(player)
 end
 
@@ -57690,6 +57892,9 @@ function Progression.Init()
 	Remotes.onServer("BuySkin", function(player, skinId) Progression.BuySkin(player, skinId) end)
 	Remotes.onServer("QuestFetch", function(player) sendQuests(player) end)
 	Remotes.onServer("QuestClaim", function(player, questId) Progression.ClaimQuest(player, questId) end)
+	Remotes.onServer("QuestClaimAll", function(player)
+		Remotes.toClient(player, "QuestClaimAll", Progression.ClaimAllQuests(player))
+	end)
 	Remotes.onServer("ZoneTeleport", function(player, zoneId) Progression.TryZoneTeleport(player, zoneId) end)
 end
 

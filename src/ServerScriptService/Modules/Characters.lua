@@ -19,7 +19,6 @@ local Remotes = require(script.Parent:WaitForChild("Remotes"))
 local Progression = require(script.Parent:WaitForChild("Progression"))
 
 local CharacterTemplate = ServerStorage:WaitForChild("Character")
-local SpawnsFolder = workspace:WaitForChild("Spawns")
 
 -- Per-player runtime state that must not leak across respawns or leaves.
 local bindings = {}         -- [player] = { touched, died, sizeChanged }
@@ -40,17 +39,6 @@ local function sizeOf(player)
 end
 Characters.sizeOf = sizeOf
 
-local function pickSpawn()
-	local options = {}
-	for _, spawn in ipairs(SpawnsFolder:GetChildren()) do
-		if spawn:IsA("BasePart") then
-			table.insert(options, spawn)
-		end
-	end
-	if #options == 0 then return CFrame.new(0, 5, 0) end
-	return options[math.random(1, #options)]:GetPivot()
-end
-
 -- WalkSpeed lives in StarterPlayer (an asset property), never in code: the x2
 -- Speed pass doubles whatever the place says the base speed is.
 local function targetWalkSpeed(player)
@@ -58,6 +46,7 @@ local function targetWalkSpeed(player)
 	if player:GetAttribute("2xSpeed") then base *= 2 end
 	return base
 end
+Characters.targetWalkSpeed = targetWalkSpeed
 
 -- Spawn protection, in both directions: a protected cube cannot be eaten and
 -- cannot eat anybody, so it is never a free aggression window. It stops spawn
@@ -327,6 +316,10 @@ function Characters.OnKill(killer, victim, force)
 	Progression.notify(killer, absorbed > 0
 		and ("Ate %s   +   %d Size"):format(victim.Name, math.floor(absorbed))
 		or ("Ate %s"):format(victim.Name), "good")
+
+	-- Kill feed: everybody sees who ate whom. The client owns presentation (and
+	-- whether it is shown at all), so this only reports the fact.
+	Remotes.toAllClients("KillFeed", killer.Name, victim.Name, math.floor(absorbed))
 end
 
 --// ------------------------------------------------------------------- spawning
@@ -336,7 +329,9 @@ local function spawnCharacter(player, keepSize)
 
 	player.Character = model
 	model.Parent = workspace
-	model:PivotTo(pickSpawn())
+	-- Last zone the player was standing in when they are still allowed there,
+	-- otherwise a random spawn in the arena.
+	model:PivotTo(Progression.respawnPivot(player))
 
 	-- Ownership is assigned explicitly: with auto-assignment a freshly spawned
 	-- cube can end up server-owned (rubber-banding for its own player) when
@@ -415,6 +410,46 @@ function Characters.AutoFarm(player, enabled)
 				continue
 			end
 
+			local fleeDistance = tonumber(GameConfig.get("AutoFarmFleeDistance", 70)) or 70
+			local avoidDistance = tonumber(GameConfig.get("AutoFarmAvoidDistance", 45)) or 45
+			local data = DataManager.Data(player)
+			-- Opt-out, stored with the profile so it survives a rejoin and is set
+			-- from the Settings menu like every other preference.
+			local wantsFlee = not data or not data.Prefs or data.Prefs.AutoFarmFlee ~= false
+			local mySize = sizeOf(player)
+
+			-- Bigger cubes near me, collected once per tick: the food scan below
+			-- would otherwise compare 800+ cubes against every player.
+			local threats = {}
+			if wantsFlee then
+				for _, other in ipairs(Players:GetPlayers()) do
+					if other ~= player and not other:GetAttribute("Dead") and sizeOf(other) > mySize then
+						local otherRoot = other.Character and other.Character.PrimaryPart
+						if otherRoot then
+							local distance = (root.Position - otherRoot.Position).Magnitude
+							if distance <= fleeDistance * 3 then
+								table.insert(threats, { position = otherRoot.Position, distance = distance })
+							end
+						end
+					end
+				end
+			end
+
+			local nearest
+			for _, threat in ipairs(threats) do
+				if not nearest or threat.distance < nearest.distance then nearest = threat end
+			end
+			if nearest and nearest.distance <= fleeDistance then
+				-- Run straight away from it and re-evaluate next tick: a fixed
+				-- destination walks into walls and back into the same player.
+				local away = root.Position - nearest.position
+				if away.Magnitude > 0.01 then
+					humanoid:MoveTo(root.Position + away.Unit * fleeDistance)
+				end
+				task.wait(0.4)
+				continue
+			end
+
 			local foodFolder = workspace:FindFirstChild("FoodParts")
 			local closestFood, closestDistance
 			if foodFolder then
@@ -422,8 +457,19 @@ function Characters.AutoFarm(player, enabled)
 					if food:IsA("BasePart") and food.CanTouch then
 						local distance = (root.Position - food.Position).Magnitude
 						if not closestDistance or distance < closestDistance then
-							closestDistance = distance
-							closestFood = food
+							-- Food parked next to a bigger cube is bait: walking to it
+							-- is how auto-farm used to feed the server's largest player.
+							local guarded = false
+							for _, threat in ipairs(threats) do
+								if (food.Position - threat.position).Magnitude <= avoidDistance then
+									guarded = true
+									break
+								end
+							end
+							if not guarded then
+								closestDistance = distance
+								closestFood = food
+							end
 						end
 					end
 				end

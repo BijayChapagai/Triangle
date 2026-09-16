@@ -139,6 +139,10 @@ local function harden(data)
 	if type(data.Receipts) ~= "table" then data.Receipts = {} end
 	if type(data.Gifts) ~= "table" then data.Gifts = {} end
 	if type(data.Stats) ~= "table" then data.Stats = { Eaten = 0, Kills = 0, PlayTime = 0 } end
+	-- Client settings, validated against GameData/Prefs on write. LastZone is where
+	-- the player was standing, so a respawn puts them back there.
+	if type(data.Prefs) ~= "table" then data.Prefs = {} end
+	data.LastZone = tonumber(data.LastZone) or 0
 	return data
 end
 

@@ -19,6 +19,7 @@ local Progression = {}
 local Progress = {}          -- [player] = { questId = progress }
 local sizeTweens = {}        -- [character] = Tween
 local lastRebirthRequest = {}
+local lastZoneTeleport = {}   -- [player] = os.clock(), throttles the zone remote
 
 local function dayStamp()
 	return math.floor(os.time() / 86400)
@@ -189,6 +190,23 @@ function Progression.CheckSize(player)
 	end
 end
 
+-- Claim every finished, unclaimed quest in one click. Each reward still goes
+-- through ClaimQuest, so nothing can be paid twice or bypass its own checks.
+function Progression.ClaimAllQuests(player)
+	local data = DataManager.Data(player)
+	local prog = Progress[player]
+	if not data or not prog then return 0 end
+
+	local claimed = 0
+	for _, q in ipairs(GameConfig.QUESTS) do
+		if not data.ClaimedQuests[q.id] and (prog[q.id] or 0) >= q.goal then
+			Progression.ClaimQuest(player, q.id)
+			claimed += 1
+		end
+	end
+	return claimed
+end
+
 function Progression.ClaimQuest(player, questId)
 	local data = DataManager.Data(player)
 	local prog = Progress[player]
@@ -277,6 +295,45 @@ end
 --// -------------------------------------------------------------------- zones
 -- Shared by the teleport remote AND the food handler: walking into a locked dais
 -- (they have no walls) must not hand out its rarity tier for free.
+-- A random spawn point in the open arena. Lives here (not in Characters) so both
+-- the zone remote and respawning agree on what "the arena" means.
+function Progression.arenaPivot()
+	local spawns = workspace:FindFirstChild("Spawns")
+	local options = {}
+	if spawns then
+		for _, spawn in ipairs(spawns:GetChildren()) do
+			if spawn:IsA("BasePart") then
+				table.insert(options, spawn)
+			end
+		end
+	end
+	if #options == 0 then
+		return CFrame.new(0, GameConfig.MAP.FloorY + 5, 0)
+	end
+	return options[math.random(1, #options)]:GetPivot()
+end
+
+-- Where a fresh cube appears: the zone the player was last standing in, if they
+-- are still allowed there, otherwise a random spawn. Being thrown back to the
+-- arena after every death in a far zone reads as a bug even when it is not one.
+function Progression.respawnPivot(player)
+	local data = DataManager.Data(player)
+	local zoneId = data and tonumber(data.LastZone) or 0
+
+	if zoneId == GameConfig.VIP.ZoneId then
+		if player:GetAttribute("VIP") then
+			return CFrame.new(GameConfig.VIP.Teleport)
+		end
+	elseif zoneId > 0 then
+		local zone = GameConfig.getZone(zoneId)
+		if zone and Progression.CanUseZone(player, zoneId) then
+			return CFrame.new(zone.center[1], zone.topY + 4, zone.center[3])
+		end
+	end
+
+	return Progression.arenaPivot()
+end
+
 function Progression.CanUseZone(player, zoneId)
 	zoneId = tonumber(zoneId) or 0
 	if zoneId <= 0 then return true end
@@ -294,10 +351,37 @@ function Progression.CanUseZone(player, zoneId)
 	return true
 end
 
+-- Shared tail for a successful teleport: start the cooldown, remember where the
+-- player ended up (respawning puts them back here) and confirm to the client.
+local function finishTeleport(player, zoneId)
+	lastZoneTeleport[player] = os.clock()
+	local data = DataManager.Data(player)
+	if data then data.LastZone = zoneId end
+	Remotes.toClient(player, "ZoneTeleport", zoneId, true, "")
+end
+
 function Progression.TryZoneTeleport(player, zoneId)
 	if not DataManager.HasProfile(player) then return end
 	zoneId = tonumber(zoneId)
 	if not zoneId then return end
+
+	-- The remote is public and PivotTo is not free: one hop per cooldown.
+	local cooldown = tonumber(GameConfig.get("ZoneTeleportCooldown", 5)) or 5
+	local last = lastZoneTeleport[player]
+	if last and os.clock() - last < cooldown then
+		Remotes.toClient(player, "ZoneTeleport", zoneId, false, "wait a moment")
+		return
+	end
+
+	-- Zone 0 is "back to the arena": always allowed, no gate to check.
+	if zoneId == 0 then
+		local char = player.Character
+		if char and char.PrimaryPart then
+			char:PivotTo(Progression.arenaPivot())
+		end
+		finishTeleport(player, 0)
+		return
+	end
 
 	-- The VIP wing is a pseudo-zone: same gate, different destination.
 	if zoneId == GameConfig.VIP.ZoneId then
@@ -311,7 +395,7 @@ function Progression.TryZoneTeleport(player, zoneId)
 		if char and char.PrimaryPart then
 			char:PivotTo(CFrame.new(GameConfig.VIP.Teleport))
 		end
-		Remotes.toClient(player, "ZoneTeleport", zoneId, true, "")
+		finishTeleport(player, zoneId)
 		return
 	end
 
@@ -330,7 +414,7 @@ function Progression.TryZoneTeleport(player, zoneId)
 		-- Stand on the dais, clear of the food and other cubes.
 		char:PivotTo(CFrame.new(zone.center[1], zone.topY + 4, zone.center[3]))
 	end
-	Remotes.toClient(player, "ZoneTeleport", zoneId, true, "")
+	finishTeleport(player, zoneId)
 end
 
 --// ------------------------------------------------------------------ rebirth
@@ -355,6 +439,8 @@ function Progression.TryRebirth(player)
 
 	data.Rebirths += 1
 	data.RebirthMult = GameConfig.rebirthMultiplier(data.Rebirths)
+	player:SetAttribute("Rebirths", data.Rebirths)
+	player:SetAttribute("RebirthMult", data.RebirthMult)
 
 	-- Grant the cheapest rebirth skin not owned yet, so the order always matches
 	-- the requirements advertised in the Skins menu.
@@ -426,6 +512,11 @@ function Progression.InitPlayer(player)
 		data.QuestDay = today
 	end
 
+	-- Mirrored onto the player so the client can evaluate zone gates and draw the
+	-- rebirth HUD without a remote round trip.
+	player:SetAttribute("Rebirths", data.Rebirths or 0)
+	player:SetAttribute("RebirthMult", data.RebirthMult or 1)
+
 	local prog = {}
 	for _, q in ipairs(GameConfig.QUESTS) do
 		prog[q.id] = data.Quests[q.id] or 0
@@ -461,6 +552,7 @@ function Progression.PlayerRemoving(player)
 	end
 	Progress[player] = nil
 	lastRebirthRequest[player] = nil
+	lastZoneTeleport[player] = nil
 	Leaderboards.PlayerRemoving(player)
 end
 
@@ -477,6 +569,9 @@ function Progression.Init()
 	Remotes.onServer("BuySkin", function(player, skinId) Progression.BuySkin(player, skinId) end)
 	Remotes.onServer("QuestFetch", function(player) sendQuests(player) end)
 	Remotes.onServer("QuestClaim", function(player, questId) Progression.ClaimQuest(player, questId) end)
+	Remotes.onServer("QuestClaimAll", function(player)
+		Remotes.toClient(player, "QuestClaimAll", Progression.ClaimAllQuests(player))
+	end)
 	Remotes.onServer("ZoneTeleport", function(player, zoneId) Progression.TryZoneTeleport(player, zoneId) end)
 end
 

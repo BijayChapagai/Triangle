@@ -117,6 +117,27 @@ function PlayerModule.Init()
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
 
+	-- Client settings. Fired with no key to fetch, with a key to save. Keys and
+	-- types are validated against GameData/Prefs, so neither a stale profile nor a
+	-- modified client can invent settings or write arbitrary values.
+	Remotes.onServer("SavePrefs", function(player, key, value)
+		local data = DataManager.Data(player)
+		if not data then return end
+
+		if key == nil then
+			Remotes.toClient(player, "SavePrefs", GameConfig.mergePrefs(data.Prefs))
+			return
+		end
+
+		if typeof(key) ~= "string" then return end
+		local default = GameConfig.PREFS[key]
+		if default == nil or typeof(value) ~= typeof(default) then return end
+
+		data.Prefs = data.Prefs or {}
+		data.Prefs[key] = value
+		Remotes.toClient(player, "SavePrefs", GameConfig.mergePrefs(data.Prefs))
+	end)
+
 	-- Buying a pass mid-session applies immediately instead of on the next rejoin.
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, purchased)
 		if not purchased then return end
@@ -125,7 +146,9 @@ function PlayerModule.Init()
 				player:SetAttribute(attribute, true)
 				if kind == "speed" then
 					local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-					if humanoid then humanoid.WalkSpeed *= 2 end
+					-- Through Characters so a mid-session purchase and a fresh spawn
+					-- cannot disagree (doubling an already doubled speed).
+					if humanoid then humanoid.WalkSpeed = Characters.targetWalkSpeed(player) end
 				elseif kind == "vip" then
 					Progression.notify(player, "VIP unlocked: the VIP wing and its rare food are yours.", "good")
 				else

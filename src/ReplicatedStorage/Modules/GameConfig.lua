@@ -406,6 +406,43 @@ if logFolder then
 end
 GameConfig.UPDATELOG = UPDATELOG
 
+--// -------------------------------------------------------------------- prefs
+-- Defaults for the client settings menu (GameData/Prefs). A player's own values
+-- live in their profile under Data.Prefs; these are what a fresh profile starts
+-- from, and they stay editable in Studio like every other content.
+local PREFS = {}
+local prefsFolder = want(GameData, "Prefs")
+if prefsFolder then
+	for _, entry in ipairs(prefsFolder:GetChildren()) do
+		if entry:IsA("BoolValue") then
+			PREFS[entry.Name] = entry.Value == true
+		elseif entry:IsA("NumberValue") or entry:IsA("IntValue") then
+			PREFS[entry.Name] = tonumber(entry.Value) or 0
+		elseif entry:IsA("StringValue") then
+			PREFS[entry.Name] = tostring(entry.Value)
+		end
+	end
+end
+GameConfig.PREFS = PREFS
+
+-- Merge saved prefs over the defaults. Unknown keys are dropped and a value whose
+-- type does not match the default is replaced, so neither a stale profile nor a
+-- tampered client can invent settings. Used by both the server and the client.
+function GameConfig.mergePrefs(saved)
+	local out = {}
+	local hasSaved = type(saved) == "table"
+	for key, default in pairs(PREFS) do
+				local value = nil
+		if hasSaved then value = saved[key] end
+		if typeof(value) == typeof(default) then
+			out[key] = value
+		else
+			out[key] = default
+		end
+	end
+	return out
+end
+
 --// -------------------------------------------------------------------- codes
 local CODES = {}
 local codesFolder = want(GameData, "Codes")
