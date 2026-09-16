@@ -1,3 +1,9 @@
+--!nonstrict
+-- Types for the content contract. Every module reads game content through this
+-- file, so these aliases are the shapes the whole codebase agrees on. Typing is
+-- gradual (nonstrict): an unannotated module still checks out, and tools/verify.py
+-- strips the annotations before its Lua 5.x parse, so the round trip and the
+-- syntax pass keep working without a Luau binary.
 --!strict
 -- GameConfig: reads the game's CONTENT out of the place, never out of code.
 --
@@ -33,7 +39,54 @@ end
 
 local missingWarned = {}
 
-local function want(parent, name)
+export type Rarity = {
+	name: string,
+	weight: number,
+	value: number,
+	size: number,
+	color: Color3,
+	rgb: { number },
+}
+
+export type Skin = {
+	id: string,
+	color: Color3,
+	rgb: { number },
+	unlock: string, -- start | cash | size | rebirth
+	req: number,
+	order: number,
+}
+
+-- A zone IS its dais: the part supplies the centre, the radius and the top
+-- surface, its value children supply the rules. centre is {x, topY, z}.
+export type Zone = {
+	id: number,
+	name: string,
+	part: BasePart,
+	color: Color3,
+	rgb: { number },
+	rarity: string,
+	req: { size: number?, rebirth: number? },
+	center: { number },
+	radius: number,
+	topY: number,
+}
+
+export type Quest = {
+	id: string,
+	type: string, -- eat | kill | rebirth | size
+	goal: number,
+	rewardCash: number,
+	rewardSkin: string,
+	text: string,
+	order: number,
+}
+
+-- Client preferences. Keys and default values come from GameData/Prefs, so the
+-- value type is whatever the content says it is.
+export type Prefs = { [string]: boolean | number | string }
+
+local function want(parent: Instance?, name: string): Instance?
 	local child = parent and parent:FindFirstChild(name)
 	if not child then
 		local key = tostring(parent and parent.Name) .. "/" .. name
@@ -45,14 +98,14 @@ local function want(parent, name)
 	return child
 end
 
-local function valueOf(instance, fallback)
+local function valueOf(instance: Instance?, fallback: any): any
 	if instance == nil then return fallback end
 	local v = instance.Value
 	if v == nil then return fallback end
 	return v
 end
 
-local function numbers(folder)
+local function numbers(folder: Instance?): { number }
 	local out = {}
 	if not folder then return out end
 	for _, child in ipairs(folder:GetChildren()) do
@@ -67,11 +120,11 @@ local function numbers(folder)
 	return out
 end
 
-local function rgbOf(color3)
+local function rgbOf(color3: Color3): { number }
 	return { math.floor(color3.R * 255 + 0.5), math.floor(color3.G * 255 + 0.5), math.floor(color3.B * 255 + 0.5) }
 end
 
-local function colorOf(parent, fallback)
+local function colorOf(parent: Instance?, fallback: { number }): Color3
 	local cv = parent and parent:FindFirstChild("Color")
 	if cv and cv:IsA("Color3Value") then
 		return cv.Value
@@ -83,7 +136,7 @@ end
 local SETTINGS = numbers(want(GameData, "Settings"))
 GameConfig.SETTINGS = SETTINGS
 
-local function setting(name, fallback)
+local function setting(name: string, fallback: any): any
 	local v = SETTINGS[name]
 	if v == nil then return fallback end
 	return v
@@ -131,7 +184,7 @@ end
 
 -- Admin access is by UserId (Settings/Admins in the asset), with the group as an
 -- optional fallback so a whole team can be granted access later.
-function GameConfig.isAdmin(userId, player)
+function GameConfig.isAdmin(userId: number, player: Player?): boolean
 	userId = tonumber(userId)
 	if userId and GameConfig.ADMINS[userId] then return true end
 	local group = GameConfig.GROUP_ID
@@ -162,7 +215,7 @@ if #RANKS == 0 then
 end
 GameConfig.RANKS = RANKS
 
-function GameConfig.getRank(sizeVal, rebirths)
+function GameConfig.getRank(sizeVal: number, rebirths: number): string
 	local scale = 1 + (rebirths or 0) * (tonumber(setting("RankRebirthScale", 0.6)) or 0.6)
 	local rank = 1
 	for i, entry in ipairs(RANKS) do
@@ -173,7 +226,7 @@ end
 
 --// ----------------------------------------------------------------- rarities
 local RARITIES = {}
-local RARITY_LIST = {}
+local RARITY_LIST: { Rarity } = {}
 local rarityFolder = want(GameData, "Rarities")
 if rarityFolder then
 	for _, entry in ipairs(rarityFolder:GetChildren()) do
@@ -193,7 +246,7 @@ GameConfig.RARITIES = RARITIES
 GameConfig.RARITY_LIST = RARITY_LIST
 
 -- pick a rarity key, optionally raising the floor (the VIP wing)
-function GameConfig.pickRarity(floorTier)
+function GameConfig.pickRarity(floorTier: string?): string
 	local floorValue = nil
 	if floorTier ~= nil then
 		local floorRarity = RARITIES[floorTier]
@@ -248,7 +301,7 @@ if #SKINS == 0 then
 end
 GameConfig.SKINS = SKINS
 
-function GameConfig.getSkin(skinId)
+function GameConfig.getSkin(skinId: string?): Skin?
 	for _, s in ipairs(SKINS) do
 		if s.id == skinId then return s end
 	end
@@ -264,7 +317,7 @@ GameConfig.ZONES = ZONES          -- the same table GameConfig.zones() fills
 -- for long (a 30 second WaitForChild here would freeze the loading screen).
 local zonesScanned = false
 
-local function scanZones(waitSeconds)
+local function scanZones(waitSeconds: number?): boolean
 	local folder = workspace:FindFirstChild("Zones")
 	if not folder and waitSeconds then
 		folder = workspace:WaitForChild("Zones", waitSeconds)
@@ -307,14 +360,14 @@ scanZones(nil)
 
 -- The zone list. Client menus must call this rather than reading ZONES directly,
 -- because in ReplicatedFirst the map may not have replicated at require time.
-function GameConfig.zones()
+function GameConfig.zones(): { Zone }
 	if not zonesScanned or #ZONES == 0 then
 		scanZones(5)
 	end
 	return ZONES
 end
 
-function GameConfig.getZone(zoneId)
+function GameConfig.getZone(zoneId: number): Zone?
 	zoneId = tonumber(zoneId)
 	for _, z in ipairs(GameConfig.zones()) do
 		if z.id == zoneId then return z end
@@ -324,7 +377,7 @@ end
 
 -- Human readable lock reason ("" when unlocked). Used by the server gate, the
 -- Zones menu and the generated signs so all three always agree.
-function GameConfig.zoneLockReason(zone, sizeVal, rebirths)
+function GameConfig.zoneLockReason(zone: Zone?, sizeVal: number, rebirths: number): string
 	if not zone or not zone.req then return "" end
 	local req = zone.req
 	if req.rebirth and (rebirths or 0) < req.rebirth then
@@ -410,7 +463,7 @@ GameConfig.UPDATELOG = UPDATELOG
 -- Defaults for the client settings menu (GameData/Prefs). A player's own values
 -- live in their profile under Data.Prefs; these are what a fresh profile starts
 -- from, and they stay editable in Studio like every other content.
-local PREFS = {}
+local PREFS: Prefs = {}
 local prefsFolder = want(GameData, "Prefs")
 if prefsFolder then
 	for _, entry in ipairs(prefsFolder:GetChildren()) do
@@ -428,7 +481,7 @@ GameConfig.PREFS = PREFS
 -- Merge saved prefs over the defaults. Unknown keys are dropped and a value whose
 -- type does not match the default is replaced, so neither a stale profile nor a
 -- tampered client can invent settings. Used by both the server and the client.
-function GameConfig.mergePrefs(saved)
+function GameConfig.mergePrefs(saved: { [string]: any }?): Prefs
 	local out = {}
 	local hasSaved = type(saved) == "table"
 	for key, default in pairs(PREFS) do
@@ -478,7 +531,7 @@ end
 GameConfig.PRODUCTS = PRODUCTS
 GameConfig.PRODUCT_LIST = PRODUCT_LIST
 
-function GameConfig.getProductByKind(kind)
+function GameConfig.getProductByKind(kind: string): any
 	for _, def in ipairs(PRODUCT_LIST) do
 		if def.kind == kind then return def end
 	end
@@ -498,22 +551,22 @@ end
 GameConfig.GAMEPASSES = PASSES
 GameConfig.VIP.GamePassId = PASSES.vip or 975187916
 
-function GameConfig.passId(kind)
+function GameConfig.passId(kind: string): number
 	return PASSES[kind]
 end
 
 --// ------------------------------------------------------------ progression math
-function GameConfig.visualSize(sizeVal)
+function GameConfig.visualSize(sizeVal: number): number
 	local factor = tonumber(setting("VisualSizeFactor", 0.12)) or 0.12
 	return 1 + math.sqrt(math.max(sizeVal or 0, 0)) * factor
 end
 
-function GameConfig.maxCubeSize()
+function GameConfig.maxCubeSize(): number
 	return tonumber(setting("MaxCubeSize", 220)) or 220
 end
 
 -- r0 = 450, r1 = 1715, r2 = 4550, r5 = 27.4k, r10 = 109.7k with the shipped numbers
-function GameConfig.rebirthRequirement(rebirths)
+function GameConfig.rebirthRequirement(rebirths: number): number
 	local r = math.max(rebirths or 0, 0)
 	local base = tonumber(setting("RebirthBase", 250)) or 250
 	local exp = tonumber(setting("RebirthExponent", 2.6)) or 2.6
@@ -521,26 +574,26 @@ function GameConfig.rebirthRequirement(rebirths)
 	return math.floor(base * ((r + 1) ^ exp)) + add
 end
 
-function GameConfig.rebirthMultiplier(rebirths)
+function GameConfig.rebirthMultiplier(rebirths: number): number
 	local step = tonumber(setting("RebirthMultStep", 0.12)) or 0.12
 	return 1 + (rebirths or 0) * step
 end
 
 -- Cash payout for rebirthing: feeds the cash-priced skins, so Cash is a currency
 -- with something to spend it on instead of just a number in the HUD.
-function GameConfig.rebirthCashReward(rebirths)
+function GameConfig.rebirthCashReward(rebirths: number): number
 	local per = tonumber(setting("RebirthCashPerLevel", 250)) or 250
 	return per * math.max(rebirths or 0, 0)
 end
 
 -- Cash per cube eaten; doubled by the x2 Cash gamepass.
-function GameConfig.cashPerCube(rebirths, hasDoubleCash)
+function GameConfig.cashPerCube(rebirths: number, hasDoubleCash: boolean): number
 	local base = tonumber(setting("CashPerCubeBase", 1)) or 1
 	local per = tonumber(setting("CashPerCubePerRebirth", 1)) or 1
 	return base + per * math.max(rebirths or 0, 0) * (hasDoubleCash and 2 or 1)
 end
 
-function GameConfig.color3(rgb)
+function GameConfig.color3(rgb: { number }): Color3
 	return Color3.fromRGB(rgb[1], rgb[2], rgb[3])
 end
 

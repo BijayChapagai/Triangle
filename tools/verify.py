@@ -84,15 +84,223 @@ COMPOUND = re.compile(r"([A-Za-z_][\w.]*(?:\[[^\]]*\])?)\s*(\+=|-=|\*=|/=|\.\.=)
 OP = {"+=": "+", "-=": "-", "*=": "*", "/=": "/", "..=": ".."}
 
 
+def mask_lua(source):
+    """Blank out string literal contents AND comments, keeping byte offsets.
+
+    Used by the annotation stripper, which has to tell a type annotation from a
+    method call: `local x: number` is one, `player:SetAttribute(...)` is not, and
+    `"Resets in %d:00"` is neither.
+    """
+    out = list(source)
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if c in "\"'":
+            quote = c
+            i += 1
+            while i < n:
+                if source[i] == "\\":
+                    out[i] = " "
+                    if i + 1 < n and source[i + 1] != "\n":
+                        out[i + 1] = " "
+                    i += 2
+                    continue
+                if source[i] == quote:
+                    i += 1
+                    break
+                if source[i] == "\n":
+                    break          # unterminated; stop rather than eat the file
+                out[i] = " "
+                i += 1
+            continue
+        if source.startswith("[[", i) or re.match(r"\[=+\[", source[i:i + 12]):
+            m = re.match(r"\[(=*)\[", source[i:])
+            closer = "]" + m.group(1) + "]"
+            end = source.find(closer, i)
+            end = n if end < 0 else end + len(closer)
+            for j in range(i, end):
+                if out[j] != "\n":
+                    out[j] = " "
+            i = end
+            continue
+        if source.startswith("--", i):
+            if source.startswith("--[[", i) or re.match(r"--\[=+\[", source[i:i + 12]):
+                m = re.match(r"--\[(=*)\[", source[i:])
+                closer = "]" + m.group(1) + "]"
+                end = source.find(closer, i)
+                end = n if end < 0 else end + len(closer)
+            else:
+                end = source.find("\n", i)
+                end = n if end < 0 else end
+            for j in range(i, end):
+                if out[j] != "\n":
+                    out[j] = " "
+            i = end
+            continue
+        i += 1
+    return "".join(out)
+
+
+def _match_close(text, open_index):
+    """Index of the bracket closing the one at open_index, or None."""
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    close = pairs.get(text[open_index])
+    if not close:
+        return None
+    depth, i, n = 0, open_index, len(text)
+    while i < n:
+        if text[i] in "([{":
+            depth += 1
+        elif text[i] in ")]}":
+            depth -= 1
+            if depth == 0:
+                return i if text[i] == close else None
+        i += 1
+    return None
+
+
+def _scan_type(text, i):
+    """End offset of the type expression starting at i.
+
+    Handles names (`number`, `Enums.Foo`), optionals (`string?`), unions
+    (`number | nil`), tables/arrays (`{number}`, `{ id: number }`), functions
+    (`(number) -> string`) and generics-free forms, which is all this project
+    uses. Stops at `=`, `,`, `;`, a statement newline or a closing bracket.
+    """
+    n = len(text)
+    while i < n and text[i] in " \t\n\r":
+        i += 1
+    depth = 0
+    while i < n:
+        c = text[i]
+        if c in "{[(":
+            depth += 1
+            i += 1
+            continue
+        if c in "}])":
+            if depth == 0:
+                break
+            depth -= 1
+            i += 1
+            continue
+        if depth == 0:
+            if c in "=,;":
+                break
+            if c == "\n":
+                probe = text[i + 1:i + 60].lstrip()
+                if probe.startswith("|") or probe.startswith("->"):
+                    i += 1
+                    continue
+                break
+            if text.startswith("->", i):
+                i += 2
+                continue
+            if c == "|":
+                i += 1
+                continue
+        i += 1
+    return i
+
+
+def _colon_cuts(text, start, end):
+    """Spans of every top-level `: <type>` inside text[start:end]."""
+    cuts, depth, i = [], 0, start
+    while i < end:
+        c = text[i]
+        if c in "{[(":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == ":" and depth == 0 and not text.startswith("::", i):
+            stop = min(_scan_type(text, i + 1), end)
+            cuts.append((i, stop))
+            i = stop
+            continue
+        i += 1
+    return cuts
+
+
+def strip_luau_types(source):
+    """Remove Luau-only type syntax so a Lua 5.x parser can read the result.
+
+    Handled: `--!strict` headers, `type X = ...` aliases (single or multi-line),
+    annotations on `local` declarations, on function parameters and on return
+    types. Deliberately NOT handled: `::` casts, generic parameter lists and
+    string interpolation - this project does not use them, and guessing at syntax
+    the stripper does not understand is how a check starts lying.
+
+    On a source with no annotations this returns the input unchanged; there is a
+    test asserting exactly that for every module in src/.
+    """
+    masked = mask_lua(source)
+    cuts = []
+
+    # Headers are matched against the original text: mask_lua has already blanked
+    # them out of `masked`. Worst case (a long string whose line starts with --!)
+    # only affects the parse-check copy, never the shipped source.
+    for m in re.finditer(r"^[ \t]*--[ \t]*![^\n]*\n?", source, re.M):
+        cuts.append(m.span())
+
+    for m in re.finditer(r"\b(?:export[ \t]+)?type[ \t]+[A-Za-z_]\w*[ \t]*=", masked):
+        cuts.append((m.start(), _scan_type(masked, m.end())))
+
+    for m in re.finditer(r"\bfunction\b[^()\n]*\(", masked):
+        close = _match_close(masked, m.end() - 1)
+        if close is None:
+            continue
+        cuts.extend(_colon_cuts(masked, m.end(), close))
+        probe = masked[close + 1:close + 61]
+        colon = re.match(r"[ \t\n]*:", probe)
+        if colon:
+            start = close + 1 + colon.end() - 1
+            cuts.append((close + 1 + colon.end() - len(colon.group(0)),
+                         _scan_type(masked, start)))
+
+    for m in re.finditer(r"\blocal[ \t]+", masked):
+        i, depth, n = m.end(), 0, len(masked)
+        j = i
+        while j < n:
+            c = masked[j]
+            if c in "{[(":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif depth == 0 and (c == "=" or c == "\n"):
+                break
+            j += 1
+        if ":" in masked[i:j]:
+            cuts.extend(_colon_cuts(masked, i, j))
+
+    if not cuts:
+        return source
+
+    cuts.sort()
+    merged = []
+    for start, end in cuts:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+
+    out, previous = [], 0
+    for start, end in merged:
+        out.append(source[previous:start])
+        previous = end
+    out.append(source[previous:])
+    return "".join(out)
+
+
 def normalize(source):
     """Luau -> Lua 5.x, enough for a parse check.
 
+    * type annotations and aliases are removed (strip_luau_types);
     * `x += 1` (including the inline `if a then x += 1 end` form) becomes
       `x = x + 1`;
     * the Luau-only `continue` statement becomes a dummy local.
-    Type annotations and string interpolation are not handled: no module this
-    project ships uses them (third party code is excluded from the pass).
+    String interpolation is not handled: no module this project ships uses it
+    (third party code is excluded from the pass).
     """
+    source = strip_luau_types(source)
     text = COMPOUND.sub(lambda m: "%s = %s %s " % (m.group(1), m.group(1), OP[m.group(2)]),
                         source)
     return re.sub(r"\bcontinue\b", "local _continue = nil", text)
