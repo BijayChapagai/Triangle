@@ -6,11 +6,15 @@
     "the server and client read the GameData instances, so after a build you can",
     "tune the game in Studio (values, colours, prices, zones, quests...) without",
     "touching a single line of Lua.",
+    "Zones are separate arenas: each entry in \"zones\" becomes a walled floor in",
+    "workspace/Zones, so \"center\" is that arena's position in the world (studs",
+    "from the hub arena at 0,0) and \"radius\" is half its floor width.",
     "Edit this file only if you want the change to survive a rebuild."
   ],
   "settings": {
     "AutoFarmAvoidDistance": 45,
     "AutoFarmFleeDistance": 70,
+    "AutoFarmMaxRange": 400,
     "BaseFoodTarget": 420,
     "CameraFov": 70,
     "CameraFovPunch": 6,
@@ -63,9 +67,11 @@
     "VisualSizeFactor": 0.12,
     "WallInnerX": 278.5,
     "WallInnerZ": 328.5,
-    "ZoneFloorY": 0.05,
-    "ZoneFoodTarget": 60,
-    "ZoneTeleportCooldown": 5
+    "ZoneFloorThickness": 16,
+    "ZoneFoodTarget": 150,
+    "ZoneTeleportCooldown": 5,
+    "ZoneWallHeight": 87,
+    "ZoneWallThickness": 4
   },
   "admins": [
     {
@@ -303,9 +309,9 @@
       "reqRebirth": 0,
       "center": [
         0,
-        0
+        1500
       ],
-      "radius": 72
+      "radius": 200
     },
     {
       "id": 2,
@@ -319,10 +325,10 @@
       "reqSize": 300,
       "reqRebirth": 0,
       "center": [
-        -220,
-        -220
+        1500,
+        0
       ],
-      "radius": 52
+      "radius": 220
     },
     {
       "id": 3,
@@ -336,10 +342,10 @@
       "reqSize": 1500,
       "reqRebirth": 0,
       "center": [
-        220,
-        -220
+        -1500,
+        0
       ],
-      "radius": 52
+      "radius": 240
     },
     {
       "id": 4,
@@ -353,10 +359,10 @@
       "reqSize": 0,
       "reqRebirth": 2,
       "center": [
-        -220,
-        220
+        0,
+        -1500
       ],
-      "radius": 52
+      "radius": 260
     },
     {
       "id": 5,
@@ -370,10 +376,10 @@
       "reqSize": 0,
       "reqRebirth": 5,
       "center": [
-        220,
-        220
+        0,
+        3200
       ],
-      "radius": 52
+      "radius": 280
     }
   ],
   "quests": [

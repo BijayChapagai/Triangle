@@ -11,10 +11,11 @@ instances:
   StarterGui/Frames            the six menu frames, each with a RowTemplate the
                                client clones instead of building rows in code
   ReplicatedFirst/Client       the Notifier ScreenGui (toast stack + template)
-  Workspace/Zones              one dais Part per zone, carrying its own id,
-                               rarity and requirements as value children, plus a
-                               sign. Move or resize a dais in Studio and the
-                               server follows: it reads the part, not a config.
+  Workspace/Zones              one arena Model per zone - floor slab, four walls,
+                               a sign and the zone's id, rarity and requirements
+                               as value children. Move or resize an arena in
+                               Studio and the game follows: it reads the map, not
+                               a config.
 
 Runtime Lua never invents game content - it reads these instances.
 """
@@ -905,8 +906,24 @@ def notifier(b, gd):
 
 
 # ---------------------------------------------------------------------------
-# zones (Workspace/Zones)
+# zones (Workspace/Zones) - every zone is its own arena
 # ---------------------------------------------------------------------------
+
+# Copied off the shipped hub arena so a zone arena is built the same way instead
+# of invented: a 16 stud floor slab whose top face sits at FloorY, textured with
+# rbxassetid://6372755229 tiled every 8 studs, and walls 4 studs thick, 87 tall,
+# 40% see through, wearing rbxassetid://6794250394 tiled every 9 studs on all six
+# faces. Only the colour changes: floor in the zone colour, walls the same colour
+# pulled dark, so an arena reads as one place from far away.
+FLOOR_TEXTURE = "rbxassetid://6372755229"
+FLOOR_TILE = 8
+WALL_TEXTURE = "rbxassetid://6794250394"
+WALL_TILE = 9
+WALL_TRANSPARENCY = 0.4
+PLASTIC = 256       # Enum.Material.Plastic, what every shipped map part uses
+SMOOTH = 0          # Enum.SurfaceType.Smooth
+PERSISTENT = 2      # Enum.ModelStreamingMode.Persistent: never streamed out
+
 
 def zone_req_text(zone):
     if zone.get("reqRebirth"):
@@ -917,64 +934,151 @@ def zone_req_text(zone):
     return "Unlocked"
 
 
+def darken(rgb, factor=0.42):
+    """The zone colour pulled dark for walls: still names the arena, but dark
+    enough to sit behind the shipped wall texture the way the hub's blue does."""
+    return tuple(max(0, min(255, int(round(c * factor)))) for c in rgb)
+
+
+def map_part(rgb, center, size, transparency=0.0):
+    """Properties shared by every generated map part (floor slabs and walls)."""
+    return {
+        "shape": 1,          # Enum.PartType.Block
+        "Anchored": True,
+        "CanCollide": True,
+        "CanQuery": True,
+        "CanTouch": False,
+        "CastShadow": False,
+        "Locked": False,
+        "Transparency": float(transparency),
+        "Reflectance": 0.0,
+        "Material": PLASTIC,
+        "Color3uint8": ("Color3uint8", tuple(rgb)),
+        "TopSurface": SMOOTH,
+        "BottomSurface": SMOOTH,
+        "CFrame": ("CoordinateFrame", tuple(center)),
+        "size": ("Vector3", tuple(size)),
+    }
+
+
+def wall_faces(b, depth):
+    """The shipped wall texture on all six faces, tiled by studs so a wall of any
+    length keeps the same brick size instead of stretching it."""
+    return "".join(b.item("Texture", "Texture", {
+        "Face": face,
+        "Texture": ("Content", "<url>%s</url>" % WALL_TEXTURE),
+        "StudsPerTileU": float(WALL_TILE),
+        "StudsPerTileV": float(WALL_TILE),
+        "Color3": ("Color3", (255, 255, 255)),
+        "Transparency": 0.9,
+        "ZIndex": 1,
+    }, depth=depth)[0] for face in (0, 1, 2, 3, 4, 5))
+
+
+def zone_wall(b, name, size, center, rgb, depth=D + 2):
+    return b.item("Part", name, map_part(rgb, center, size, WALL_TRANSPARENCY),
+                  children=wall_faces(b, depth + 1), depth=depth)[0]
+
+
+def zone_sign(b, zone, offset_y, depth=D + 3):
+    """Billboard floating over the arena: name, rarity and requirement, in the
+    HUD's own face and colours, so the map and the Zones menu say one thing."""
+    label = {
+        "Size": ("UDim2", (1, 0, 1, 0)),
+        "BackgroundColor3": ("Color3", tuple(zone["color"])),
+        "BackgroundTransparency": 0.0,
+        "BorderSizePixel": 0,
+        "Visible": True,
+        "ZIndex": 2,
+    }
+    label.update(text_overrides(
+        "%s\n%s cubes  |  %s" % (zone["name"], zone["rarity"], zone_req_text(zone)),
+        size=26, scaled=True, x_align=1, wrapped=True, font=("raw", FONT_ALT)))
+    return b.item("BillboardGui", "Sign", {
+        "AlwaysOnTop": False,
+        "Enabled": True,
+        "ClipsDescendants": False,
+        "StudsOffset": ("Vector3", (0, offset_y, 0)),
+        "LightInfluence": 0.0,
+        "Size": ("UDim2", (0, 340, 0, 100)),
+        "MaxDistance": 1400.0,
+        "ResetOnSpawn": False,
+        "ZIndexBehavior": 1,
+    }, children=b.item("TextLabel", "Label", label,
+                       children=(ui_corner(b, 14, depth=depth + 2)
+                                 + ui_stroke(b, (0, 0, 0), 4, 0, depth=depth + 2)
+                                 + text_size(b, 34, 14, depth=depth + 2)),
+                       depth=depth + 1)[0],
+        depth=depth)[0]
+
+
+def zone_floor(b, size, center, rgb, sign, depth=D + 2):
+    """The walking surface. It IS the zone region: Food spawns inside its bounds
+    and Progression teleports to its centre, so resizing it in Studio resizes the
+    zone. The sign rides along because a billboard adornees the part it is in."""
+    texture = b.item("Texture", "Texture", {
+        "Face": 1,           # the top face, exactly as the shipped Baseplates have it
+        "Texture": ("Content", "<url>%s</url>" % FLOOR_TEXTURE),
+        "StudsPerTileU": float(FLOOR_TILE),
+        "StudsPerTileV": float(FLOOR_TILE),
+        "Color3": ("Color3", (0, 0, 0)),
+        "Transparency": 0.8,
+        "ZIndex": 1,
+    }, depth=depth + 1)[0]
+    return b.item("Part", "Floor", map_part(rgb, center, size),
+                  children=texture + sign, depth=depth)[0]
+
+
 def zones(b, gd):
+    """Workspace/Zones: one arena per zone, not one pad inside the hub arena.
+
+    Each zone is a Model holding its floor slab, four walls, a sign and the
+    zone's own Id/Rarity/ReqSize/ReqRebirth/Color values, so it can be picked up
+    and moved as a single thing in Studio - and so the game keeps reading the map
+    instead of a config: Food spawns inside the floor, Progression teleports to
+    its centre, and the client draws the Zones menu from the same instances.
+
+    The models are Persistent (never streamed out) on purpose. The client reads
+    zone names, colours and requirements off them, and that menu has to list all
+    five arenas while the player stands in the hub, 1500 studs from the nearest
+    one; twenty-five parts is a cheap price for that.
+    """
     settings = gd["settings"]
-    floor_y = float(settings["ZoneFloorY"])
-    thickness = 1.0
+    floor_y = float(settings["FloorY"])
+    slab = float(settings["ZoneFloorThickness"])
+    wall_h = float(settings["ZoneWallHeight"])
+    wall_t = float(settings["ZoneWallThickness"])
     out = []
     for z in gd["zones"]:
-        cx, cz = z["center"]
-        r = z["radius"]
-        cy = floor_y - thickness / 2.0
+        cx, cz = float(z["center"][0]), float(z["center"][1])
+        r = float(z["radius"])
+        rgb = tuple(z["color"])
+        shade = darken(rgb)
+        wall_y = floor_y + wall_h / 2.0
+        span = 2 * r
 
-        part_props = {
-            "shape": 1,          # Enum.PartType.Block
-            "Anchored": True,
-            "CanCollide": True,
-            "CanQuery": True,
-            "CanTouch": False,
-            "CastShadow": False,
-            "Locked": False,
-            "Transparency": 0.0,
-            "Reflectance": 0.0,
-            "Color3uint8": ("Color3uint8", tuple(z["color"])),
-            "CFrame": ("CoordinateFrame", (cx, cy, cz)),
-            "size": ("Vector3", (r * 2, thickness, r * 2)),
-        }
-
-        sign_text = "%s\n%s cubes  |  %s" % (z["name"], z["rarity"], zone_req_text(z))
-        label_props = {
-            "Size": ("UDim2", (1, 0, 1, 0)),
-            "BackgroundColor3": ("Color3", (10, 10, 16)),
-            "BackgroundTransparency": 0.35,
-            "BorderSizePixel": 0,
-            "Visible": True,
-            "ZIndex": 2,
-        }
-        label_props.update(text_overrides(sign_text, size=20, scaled=True, x_align=2, wrapped=True))
-
-        sign = b.item("BillboardGui", "Sign", {
-            "AlwaysOnTop": False,
-            "Enabled": True,
-            "ClipsDescendants": False,
-            "StudsOffset": ("Vector3", (0, 12, 0)),
-            "LightInfluence": 0.0,
-            "Size": ("UDim2", (0, 300, 0, 90)),
-            "MaxDistance": 900.0,
-            "ResetOnSpawn": False,
-            "ZIndexBehavior": 1,
-        }, children=b.item("TextLabel", "Label", label_props,
-                           children=text_size(b, 26, 10, depth=D + 4), depth=D + 3)[0],
-            depth=D + 2)[0]
-
+        # Walls stand just outside the floor edge, so the whole slab is playable
+        # and the east/west walls are the long ones (they close the corners).
+        floor = zone_floor(b, (span, slab, span), (cx, floor_y - slab / 2.0, cz), rgb,
+                           zone_sign(b, z, wall_h + slab / 2.0 + 30.0), D + 2)
+        walls = (
+            zone_wall(b, "WallEast", (wall_t, wall_h, span + 2 * wall_t),
+                      (cx + r + wall_t / 2.0, wall_y, cz), shade)
+            + zone_wall(b, "WallWest", (wall_t, wall_h, span + 2 * wall_t),
+                        (cx - r - wall_t / 2.0, wall_y, cz), shade)
+            + zone_wall(b, "WallNorth", (span, wall_h, wall_t),
+                        (cx, wall_y, cz + r + wall_t / 2.0), shade)
+            + zone_wall(b, "WallSouth", (span, wall_h, wall_t),
+                        (cx, wall_y, cz - r - wall_t / 2.0), shade)
+        )
         values = (integer(b, "Id", z["id"], D + 2)
                   + string(b, "Rarity", z["rarity"], D + 2)
                   + num(b, "ReqSize", z.get("reqSize", 0), D + 2)
                   + num(b, "ReqRebirth", z.get("reqRebirth", 0), D + 2)
-                  + color(b, "Color", z["color"], D + 2))
-
-        out.append(b.item("Part", z["name"], part_props,
-                          children=values + sign, depth=D + 1)[0])
+                  + color(b, "Color", rgb, D + 2))
+        out.append(b.bare_item("Model", z["name"],
+                               [("token", "ModelStreamingMode", PERSISTENT)],
+                               children=floor + walls + values, depth=D + 1)[0])
 
     return folder(b, "Zones", "".join(out), D)
 

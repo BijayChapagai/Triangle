@@ -18,11 +18,14 @@
 --   ReplicatedStorage/GameData/Codes        code -> cash
 --   ReplicatedStorage/GameData/Products     ProductId/Kind/Amount/Label
 --   ReplicatedStorage/GameData/Gamepasses   GamePassId/Kind
---   Workspace/Zones/<Name>                  the dais itself is the zone: its
---                                           position/size define the spawn area and
---                                           its Id/Rarity/ReqSize/ReqRebirth/Color
---                                           children define the rules. Move or
---                                           resize a dais and the game follows.
+--   Workspace/Zones/<Name>                  every zone is its own arena: a Model
+--                                           holding a Floor slab, four walls and a
+--                                           sign. The Floor's position/size define
+--                                           the spawn area, and the Id/Rarity/
+--                                           ReqSize/ReqRebirth/Color children (on
+--                                           the Model, or on the part for a hand
+--                                           built zone) define the rules. Move or
+--                                           resize an arena and the game follows.
 --
 -- This module only READS those instances at require time and exposes plain Lua
 -- tables, so gameplay code never touches the instance tree.
@@ -57,8 +60,9 @@ export type Skin = {
 	order: number,
 }
 
--- A zone IS its dais: the part supplies the centre, the radius and the top
--- surface, its value children supply the rules. centre is {x, topY, z}.
+-- A zone IS its arena: the Floor part supplies the centre, the half width
+-- (radius) and the top surface; the value children supply the rules.
+-- centre is {x, topY, z}.
 export type Zone = {
 	id: number,
 	name: string,
@@ -149,7 +153,6 @@ GameConfig.DATASTORE_NAME = tostring(setting("DataStoreName", "Yeah"))
 
 GameConfig.MAP = {
 	FloorY = tonumber(setting("FloorY", 0)) or 0,
-	ZoneFloorY = tonumber(setting("ZoneFloorY", 0.05)) or 0.05,
 	WallInnerX = tonumber(setting("WallInnerX", 278.5)) or 278.5,
 	WallInnerZ = tonumber(setting("WallInnerZ", 328.5)) or 328.5,
 	SpawnRegion = {
@@ -312,10 +315,28 @@ end
 local ZONES = {}
 GameConfig.ZONES = ZONES          -- the same table GameConfig.zones() fills
 
--- Scan workspace/Zones. The server always has the map at require time; a
--- ReplicatedFirst client may not, so the scan is re-runnable and never blocks
--- for long (a 30 second WaitForChild here would freeze the loading screen).
+-- Scan workspace/Zones, where every zone is its own arena: a Model holding the
+-- Floor slab (the walkable region, and the source of centre/radius/topY), four
+-- walls, a sign and the rule values. A bare Part is still accepted, so a zone
+-- hand built in Studio does not need the wrapper.
+--
+-- The server always has the map at require time; a ReplicatedFirst client may
+-- not, so the scan is re-runnable and never blocks for long (a 30 second
+-- WaitForChild here would freeze the loading screen). Zone models are Persistent
+-- - they never stream out, which is what lets a client in the hub list arenas
+-- 1500 studs away - but they land a moment after join, so an empty folder gets
+-- one short bounded wait instead of an empty Zones menu.
 local zonesScanned = false
+local zonesWaited = false
+local ZONE_ARRIVAL_WAIT = 1.5
+
+-- Rule values live on the arena Model, or on the part itself for a hand built
+-- zone; either way the same names mean the same thing.
+local function zoneValue(entry: Instance, floor: Instance, name: string, fallback: any): any
+	local found = entry:FindFirstChild(name)
+	if not found then found = floor:FindFirstChild(name) end
+	return valueOf(found, fallback)
+end
 
 local function scanZones(waitSeconds: number?): boolean
 	local folder = workspace:FindFirstChild("Zones")
@@ -324,28 +345,44 @@ local function scanZones(waitSeconds: number?): boolean
 	end
 	if not folder then return false end
 
+	if waitSeconds and not zonesWaited and #folder:GetChildren() == 0 then
+		zonesWaited = true
+		local deadline = os.clock() + math.min(waitSeconds, ZONE_ARRIVAL_WAIT)
+		while #folder:GetChildren() == 0 and os.clock() < deadline do
+			task.wait(0.05)
+		end
+	end
+
 	table.clear(ZONES)
-	for _, dais in ipairs(folder:GetChildren()) do
-		if dais:IsA("BasePart") then
-			local id = tonumber(valueOf(dais:FindFirstChild("Id"), 0)) or 0
-			local color = colorOf(dais, { 120, 200, 120 })
+	for _, entry in ipairs(folder:GetChildren()) do
+		local floor: BasePart? = nil
+		if entry:IsA("BasePart") then
+			floor = entry
+		else
+			local slab = entry:FindFirstChild("Floor")
+			if slab and slab:IsA("BasePart") then floor = slab end
+		end
+
+		if floor then
+			local id = tonumber(zoneValue(entry, floor, "Id", 0)) or 0
+			local color = colorOf(entry, rgbOf(floor.Color))
 			local req = {}
-			local reqSize = tonumber(valueOf(dais:FindFirstChild("ReqSize"), 0)) or 0
-			local reqRebirth = tonumber(valueOf(dais:FindFirstChild("ReqRebirth"), 0)) or 0
+			local reqSize = tonumber(zoneValue(entry, floor, "ReqSize", 0)) or 0
+			local reqRebirth = tonumber(zoneValue(entry, floor, "ReqRebirth", 0)) or 0
 			if reqSize > 0 then req.size = reqSize end
 			if reqRebirth > 0 then req.rebirth = reqRebirth end
 
 			table.insert(ZONES, {
 				id = id,
-				name = dais.Name,
-				part = dais,
+				name = entry.Name,
+				part = floor,
 				color = color,
 				rgb = rgbOf(color),
-				rarity = tostring(valueOf(dais:FindFirstChild("Rarity"), "Common")),
+				rarity = tostring(zoneValue(entry, floor, "Rarity", "Common")),
 				req = req,
-				center = { dais.Position.X, dais.Position.Y + dais.Size.Y / 2, dais.Position.Z },
-				radius = math.min(dais.Size.X, dais.Size.Z) / 2,
-				topY = dais.Position.Y + dais.Size.Y / 2,
+				center = { floor.Position.X, floor.Position.Y + floor.Size.Y / 2, floor.Position.Z },
+				radius = math.min(floor.Size.X, floor.Size.Z) / 2,
+				topY = floor.Position.Y + floor.Size.Y / 2,
 			})
 		end
 	end

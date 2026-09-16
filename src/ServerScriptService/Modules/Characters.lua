@@ -412,6 +412,11 @@ function Characters.AutoFarm(player, enabled)
 
 			local fleeDistance = tonumber(GameConfig.get("AutoFarmFleeDistance", 70)) or 70
 			local avoidDistance = tonumber(GameConfig.get("AutoFarmAvoidDistance", 45)) or 45
+			-- Every zone is its own walled arena now, so the closest cube in the
+			-- world can be one this player cannot reach: on the other side of a wall,
+			-- 1500 studs away. Auto-farm only walks to food it can actually get to,
+			-- and stands still rather than grinding into a wall when there is none.
+			local maxRange = tonumber(GameConfig.get("AutoFarmMaxRange", 400)) or 400
 			local data = DataManager.Data(player)
 			-- Opt-out, stored with the profile so it survives a rejoin and is set
 			-- from the Settings menu like every other preference.
@@ -419,7 +424,7 @@ function Characters.AutoFarm(player, enabled)
 			local mySize = sizeOf(player)
 
 			-- Bigger cubes near me, collected once per tick: the food scan below
-			-- would otherwise compare 800+ cubes against every player.
+			-- would otherwise compare 1200+ cubes against every player.
 			local threats = {}
 			if wantsFlee then
 				for _, other in ipairs(Players:GetPlayers()) do
@@ -456,7 +461,7 @@ function Characters.AutoFarm(player, enabled)
 				for _, food in ipairs(foodFolder:GetChildren()) do
 					if food:IsA("BasePart") and food.CanTouch then
 						local distance = (root.Position - food.Position).Magnitude
-						if not closestDistance or distance < closestDistance then
+						if distance <= maxRange and (not closestDistance or distance < closestDistance) then
 							-- Food parked next to a bigger cube is bait: walking to it
 							-- is how auto-farm used to feed the server's largest player.
 							local guarded = false

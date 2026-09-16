@@ -82,7 +82,7 @@ runtime.
 
 | Where | Contents |
 | --- | --- |
-| `ReplicatedStorage/GameData/Settings` | 50 scalars: food targets, spawn interval, rebirth curve, kill rewards, camera, notify timing, spawn regions, store name, game name |
+| `ReplicatedStorage/GameData/Settings` | 59 scalars: food targets, spawn interval, rebirth curve, kill rewards, camera, notify timing, spawn regions, zone arena wall/floor sizes, store name, game name |
 | `GameData/Admins` | who gets the console - a Folder per person with `UserId` + `Role` (currently `7362557250`) |
 | `GameData/Ranks` | rank name -> size threshold |
 | `GameData/Rarities` | `Weight`, `Value`, `Size`, `Color` per food tier |
@@ -93,16 +93,17 @@ runtime.
 | `GameData/Products` | `ProductId`, `Kind`, `Amount`, `Label` |
 | `GameData/Gamepasses` | `GamePassId`, `Kind` (`speed`/`cash`/`vip`) |
 | `GameData/UpdateLog` | ordered StringValues shown in the update log menu |
-| `Workspace/Zones/<Name>` | the dais **is** the zone: its position/size define the food pool and its `Id`, `Rarity`, `ReqSize`, `ReqRebirth`, `Color` children define the rules and the sign |
+| `Workspace/Zones/<Name>` | every zone **is** its own arena: a Model holding a `Floor` slab (its position/size define the food pool), four walls, a `Sign`, and `Id`/`Rarity`/`ReqSize`/`ReqRebirth`/`Color` children that define the rules |
 | `StarterGui/Buttons`, `StarterGui/Frames` | the HUD/menu bar and every menu panel, including their templates (`RowTemplate`, `SectionTemplate`) |
 
 Common edits:
 
 * **Add a code** - a NumberValue in `GameData/Codes` named after the code.
 * **Add a skin** - a Folder in `GameData/Skins` with `Color`/`Unlock`/`Req`/`Order`.
-* **Add a zone** - copy a dais in `Workspace/Zones`, move it, set `Id`/`Rarity`/
-  `ReqSize`/`ReqRebirth`/`Color`. The food pool, the sign, the menu row and the
-  server gate all follow.
+* **Add a zone** - copy an arena Model in `Workspace/Zones`, move it somewhere
+  with clear ground, set `Id`/`Rarity`/`ReqSize`/`ReqRebirth`/`Color`. The food
+  pool, the sign, the menu row and the server gate all follow. Resize its `Floor`
+  and the food pool resizes with it.
 * **Retune the economy** - `GameData/Settings`.
 * **Add a menu** - a TextButton in `StarterGui/Buttons` and a Frame with the same
   name in `StarterGui/Frames`; `MenuUi` wires the toggle with no code at all.
@@ -114,6 +115,32 @@ Studio edits are not clobbered.
 
 ---
 
+## The map
+
+Six arenas, all built the same way (16 stud floor slabs whose top face is
+`FloorY`, walls 4 studs thick and `ZoneWallHeight` tall, 40% see through, the
+shipped wall and floor textures):
+
+| Arena | Centre (X, Z) | Floor | Cubes | Gate |
+| --- | --- | --- | --- | --- |
+| hub (shipped) | 0, 0 | 561 x 661 | `BaseFoodTarget`, mixed rarity | none - everybody starts here |
+| Greenfield | 0, 1500 | 400 x 400 | `ZoneFoodTarget`, Common | none |
+| Crystal Cave | 1500, 0 | 440 x 440 | Rare | Size 300 |
+| Lava Forge | -1500, 0 | 480 x 480 | Epic | Size 1500 |
+| Frozen Peak | 0, -1500 | 520 x 520 | Legendary | 2 Rebirths |
+| Void Core | 0, 3200 | 560 x 560 | Mythic | 5 Rebirths |
+| VIP wing (shipped) | 347, 2 | behind `Workspace/VIPDoor` | `VipFoodTarget`, Rare+ | VIP gamepass |
+
+Travel between them is the Zones menu (`ZoneTeleport`, throttled by
+`ZoneTeleportCooldown`); the arenas are walled, so there is no walking between
+them, and dying inside one respawns you inside it while you still meet its gate.
+Zone Models are `ModelStreamingMode.Persistent` - they never stream out, which is
+what lets the client list all five arenas while the player stands in the hub.
+`tools/verify.py` fails the build if an arena loses a wall, is repainted, stops
+being Persistent, or is dragged within 100 studs of another arena.
+
+---
+
 ## How a round works
 
 1. `DataManager` loads the profile, creates `leaderstats` (`Cash`, `Size`) and
@@ -121,15 +148,15 @@ Studio edits are not clobbered.
 2. `Characters` clones `ServerStorage/Character`, parents it and wires it once -
    name tag, skin, size tween, `Died`, `Touched`, `Size.Changed`. Join, free
    respawn and paid revive all go through the same path.
-3. `Food` fills every region (open arena, each zone dais, VIP wing) and keeps
-   them topped up. Pickup claims the cube first (`CanTouch = false`), then grows
+3. `Food` fills every region (hub arena, each zone arena's floor, VIP wing) and
+   keeps them topped up. Pickup claims the cube first (`CanTouch = false`), then grows
    the player, then shrinks it out - a throwing handler can no longer leave an
    inedible cube on the map.
 4. Bigger cube touches smaller cube: the victim dies, the killer absorbs
    `KillSizeTransfer` of their size (capped) plus `KillCash`.
 5. `Progression` handles rebirths, skins, daily quests and zone travel. Zone
-   gating is shared by the teleport remote **and** the food handler, so walking
-   into a locked dais does not hand out its rarity for free.
+   gating is shared by the teleport remote **and** the food handler, so an admin
+   teleport into a locked arena still does not hand out its rarity for free.
 
 Death is explicit: `CharacterAutoLoads` and `ResetPlayerGuiOnSpawn` are **off** in
 the place, because the cube is assigned by `Characters` and the client is a single

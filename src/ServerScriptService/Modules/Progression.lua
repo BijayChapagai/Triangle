@@ -293,9 +293,10 @@ function Progression.BuySkin(player, skinId)
 end
 
 --// -------------------------------------------------------------------- zones
--- Shared by the teleport remote AND the food handler: walking into a locked dais
--- (they have no walls) must not hand out its rarity tier for free.
--- A random spawn point in the open arena. Lives here (not in Characters) so both
+-- Shared by the teleport remote AND the food handler. A zone arena is walled and
+-- its door is the teleport, but a gate that only checked the door would be one
+-- admin command away from handing out a locked rarity tier for free.
+-- A random spawn point in the hub arena. Lives here (not in Characters) so both
 -- the zone remote and respawning agree on what "the arena" means.
 function Progression.arenaPivot()
 	local spawns = workspace:FindFirstChild("Spawns")
@@ -411,7 +412,7 @@ function Progression.TryZoneTeleport(player, zoneId)
 
 	local char = player.Character
 	if char and char.PrimaryPart then
-		-- Stand on the dais, clear of the food and other cubes.
+		-- Arrive in the middle of the arena: on its floor, clear of its walls.
 		char:PivotTo(CFrame.new(zone.center[1], zone.topY + 4, zone.center[3]))
 	end
 	finishTeleport(player, zoneId)

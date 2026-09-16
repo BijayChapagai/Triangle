@@ -2,7 +2,7 @@
 
 These are the rules that are easy to break by editing a number and hard to notice
 in game: a rarity weight that no longer sums to 100, a gift id that no longer
-matches its RewardN button, a zone dais that hangs outside the arena wall, or a
+matches its RewardN button, a zone arena dropped on top of the hub arena, or a
 DataStore rename that orphans every profile.
 """
 import json
@@ -73,13 +73,15 @@ def test_settings_are_sane(gd):
     assert s["RebirthMultStep"] > 0
     assert s["SpawnInterval"] > 0 and s["SpawnBatch"] > 0
     assert s["LeaderboardThrottle"] > 0 and s["LeaderboardSize"] > 0
-    assert s["ZoneFloorY"] > s["FloorY"], "daises must sit above the floor or they z-fight"
+    assert s["ZoneFloorThickness"] > 0, "a zone floor has to be a slab, not a plane"
+    assert s["ZoneWallThickness"] > 0 and s["ZoneWallHeight"] > 20, (
+        "zone walls must be solid and too tall to hop")
     assert s["SpawnRegionMinX"] < s["SpawnRegionMaxX"]
     assert s["SpawnRegionMinZ"] < s["SpawnRegionMaxZ"]
     assert s["VipRegionMinX"] < s["VipRegionMaxX"]
     assert s["WallInnerX"] > s["SpawnRegionMaxX"], "food can spawn inside a wall"
     assert s["VipZoneId"] not in [z["id"] for z in gd["zones"]], (
-        "the VIP wing is not a dais zone; VipZoneId must not collide with one")
+        "the VIP wing is not a zone arena; VipZoneId must not collide with one")
 
 
 # --- progression ------------------------------------------------------------
@@ -143,23 +145,67 @@ def test_zone_ids_and_rarities(gd):
     assert all(color_ok(z["color"]) for z in gd["zones"])
 
 
-def test_zone_daises_fit_inside_the_walls(gd):
-    inner_x = gd["settings"]["WallInnerX"]
-    inner_z = gd["settings"]["WallInnerZ"]
+def test_zone_arenas_are_arenas(gd):
+    """A zone is its own arena: floor and walls, big enough to farm inside.
+
+    The hub arena is 561 x 661 studs, so anything much under 300 across reads as
+    the old coloured pad with walls bolted on rather than as a second arena.
+    """
     for z in gd["zones"]:
+        assert z["radius"] >= 150, "%s is %g studs across - a pad, not an arena" % (
+            z["name"], z["radius"] * 2)
+
+
+def test_zone_arenas_do_not_overlap(gd):
+    """Two arenas sharing ground would share food and make the gates ambiguous.
+
+    The hub arena is shipped geometry - walls at WallInnerX/WallInnerZ with the
+    VIP wing reaching out to VipRegionMaxX - so it is part of the layout too.
+    """
+    s = gd["settings"]
+    wall = s["ZoneWallThickness"]
+    hub_x = max(s["WallInnerX"], s["VipRegionMaxX"]) + wall
+    hub_z = s["WallInnerZ"] + wall
+    boxes = [("the hub arena", -hub_x, hub_x, -hub_z, hub_z)]
+    for z in gd["zones"]:
+        r = z["radius"] + wall
         cx, cz = z["center"]
-        assert abs(cx) + z["radius"] <= inner_x, "%s hangs outside the east/west wall" % z["name"]
-        assert abs(cz) + z["radius"] <= inner_z, "%s hangs outside the north/south wall" % z["name"]
-        assert z["radius"] > 0
+        boxes.append((z["name"], cx - r, cx + r, cz - r, cz + r))
+
+    for i, (a_name, a0, a1, a2, a3) in enumerate(boxes):
+        for b_name, b0, b1, b2, b3 in boxes[i + 1:]:
+            gap = max(max(a0, b0) - min(a1, b1), max(a2, b2) - min(a3, b3))
+            assert gap >= 100, "%s and %s are only %.0f studs apart" % (a_name, b_name, gap)
 
 
-def test_zone_daises_do_not_overlap(gd):
-    """Overlapping daises would share food and make the requirements ambiguous."""
-    zones = gd["zones"]
-    for i, a in enumerate(zones):
-        for b in zones[i + 1:]:
-            d = math.hypot(a["center"][0] - b["center"][0], a["center"][1] - b["center"][1])
-            assert d >= a["radius"] + b["radius"], "%s and %s overlap" % (a["name"], b["name"])
+def test_zone_food_pool_scales_with_the_arena(gd):
+    """The old pads were 104 studs across and held 60 cubes. An arena 400+ across
+    with the same target is a desert, and one much denser than the hub makes the
+    hub pointless - so the pool has to sit in the same range as the hub's."""
+    s = gd["settings"]
+    hub_area = (s["SpawnRegionMaxX"] - s["SpawnRegionMinX"]) * \
+        (s["SpawnRegionMaxZ"] - s["SpawnRegionMinZ"])
+    hub_density = s["BaseFoodTarget"] / float(hub_area)
+    for z in gd["zones"]:
+        density = s["ZoneFoodTarget"] / float((2 * z["radius"]) ** 2)
+        assert hub_density / 3 <= density <= hub_density * 2, (
+            "%s holds %g cubes per stud^2, the hub holds %g" % (z["name"], density, hub_density))
+
+
+def test_live_cube_count_stays_cheap(gd):
+    """Every cube is a part with a Touched connection: the total is a frame-time
+    budget, and the zone arenas multiplied it."""
+    s = gd["settings"]
+    total = s["BaseFoodTarget"] + s["VipFoodTarget"] + s["ZoneFoodTarget"] * len(gd["zones"])
+    assert total <= 1600, "%d live cubes is more than the server should carry" % total
+
+
+def test_rarer_arenas_are_bigger(gd):
+    """Bigger arena, rarer cubes: the tier should read from the map itself."""
+    rank = {r["name"]: i for i, r in enumerate(sorted(gd["rarities"], key=lambda r: -r["weight"]))}
+    ordered = sorted(gd["zones"], key=lambda z: rank[z["rarity"]])
+    radii = [z["radius"] for z in ordered]
+    assert radii == sorted(radii), "a rarer zone must not be smaller than an easier one"
 
 
 def test_zone_requirements_escalate_with_rarity(gd):
@@ -266,6 +312,10 @@ def test_prefs_defaults(gd):
 def test_autofarm_distances_are_sane(gd):
     s = gd["settings"]
     assert s["AutoFarmFleeDistance"] > s["AutoFarmAvoidDistance"] > 0
+    assert s["AutoFarmMaxRange"] > s["AutoFarmFleeDistance"], (
+        "auto-farm must be able to reach further than it runs")
+    assert s["AutoFarmMaxRange"] >= min(z["radius"] for z in gd["zones"]) * 2, (
+        "auto-farm must reach across the smallest arena or its cubes go unfarmed")
     assert s["ZoneTeleportCooldown"] >= 0
     assert s["SpawnProtection"] >= 0
     assert s["KillFeedMax"] > 0 and s["KillFeedLifetime"] > 0

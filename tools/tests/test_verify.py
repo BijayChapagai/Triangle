@@ -202,3 +202,47 @@ def test_missing_button_caption_is_caught(raw, tmp_path):
     code, out = verify(write(tmp_path / "no_caption.rbxlx", raw[:a] + raw[b:]))
     assert code == 1
     assert "Buttons/Quests" in out and "TextLabel" in out
+
+
+# Zone arenas are generated map geometry, which makes them editable in Studio -
+# and a wall dragged off, an arena dropped on the hub, or a model left streamable
+# are all silent breakage: the game still runs, the zones just stop being zones.
+def test_zone_arena_must_keep_its_walls(raw, tmp_path):
+    a, b = span(raw, "Workspace/Zones/Lava Forge/WallNorth")
+    code, out = verify(write(tmp_path / "no_wall.rbxlx", raw[:a] + raw[b:]))
+    assert code == 1
+    assert "WallNorth" in out
+
+
+def test_zone_arena_dropped_on_the_hub_is_caught(raw, tmp_path):
+    def fn(block):
+        return block.replace("<Z>1500</Z>", "<Z>0</Z>")
+
+    code, out = verify(write(tmp_path / "moved.rbxlx",
+                             replace_span(raw, "Workspace/Zones/Greenfield", fn)))
+    assert code == 1
+    assert "hub arena" in out and "Greenfield" in out
+
+
+def test_zone_arena_must_stay_persistent(raw, tmp_path):
+    """A streamable arena disappears from the client 1500 studs away, and the
+    Zones menu lists arenas by reading these instances."""
+    def fn(block):
+        return block.replace('<token name="ModelStreamingMode">2</token>',
+                             '<token name="ModelStreamingMode">0</token>', 1)
+
+    code, out = verify(write(tmp_path / "streamed.rbxlx",
+                             replace_span(raw, "Workspace/Zones/Void Core", fn)))
+    assert code == 1
+    assert "Persistent" in out
+
+
+def test_zone_arena_floor_must_stay_the_zone_colour(raw, tmp_path):
+    def fn(block):
+        return block.replace('<Color3uint8 name="Color3uint8">5299320</Color3uint8>',
+                             '<Color3uint8 name="Color3uint8">4278255360</Color3uint8>', 1)
+
+    code, out = verify(write(tmp_path / "repainted.rbxlx",
+                             replace_span(raw, "Workspace/Zones/Greenfield/Floor", fn)))
+    assert code == 1
+    assert "Greenfield/Floor" in out and "zone colour" in out

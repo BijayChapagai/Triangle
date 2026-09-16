@@ -1,6 +1,7 @@
--- Zones menu. The zones ARE the map: each dais in workspace/Zones carries its own
--- Id, Rarity, ReqSize, ReqRebirth and Color, so moving or retuning a zone in
--- Studio updates this menu, the signs and the server gate together.
+-- Zones menu. The zones ARE the map: every zone is its own walled arena in
+-- workspace/Zones, carrying its Id, Rarity, ReqSize, ReqRebirth and Color, so
+-- moving or retuning an arena in Studio updates this menu, its sign and the
+-- server gate together.
 local Zones = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -35,9 +36,10 @@ local function currentZoneName()
 	if not root then return nil end
 
 	for _, zone in ipairs(GameConfig.zones()) do
-		local dx = root.Position.X - zone.center[1]
-		local dz = root.Position.Z - zone.center[3]
-		if (dx * dx + dz * dz) <= (zone.radius * zone.radius) then
+		-- Arenas are square slabs, and radius is half a side, so this is a box test:
+		-- a circle would miss the corners of a 400 stud floor.
+		if math.abs(root.Position.X - zone.center[1]) <= zone.radius
+			and math.abs(root.Position.Z - zone.center[3]) <= zone.radius then
 			return zone.name
 		end
 	end
@@ -60,8 +62,8 @@ local function refresh()
 	local count = rebirths()
 
 	MenuUi.addRow(frame, {
-		info = "Return to the arena",
-		sub = "Leave the zone you are standing in",
+		info = "Back to the hub arena",
+		sub = "Leave the zone arena you are standing in",
 		accent = OPEN,
 		onClick = function()
 			-- Zone 0 is the arena: always allowed, no gate to check.
@@ -69,7 +71,7 @@ local function refresh()
 		end,
 	})
 
-	MenuUi.addSection(frame, "Rarity zones")
+	MenuUi.addSection(frame, "Zone arenas")
 
 	for _, zone in ipairs(GameConfig.zones()) do
 		local rarity = GameConfig.RARITIES[zone.rarity]
@@ -87,7 +89,7 @@ local function refresh()
 		})
 	end
 
-	-- The VIP wing is not a dais in workspace/Zones, but it behaves like one.
+	-- The VIP wing is not an arena in workspace/Zones, but it behaves like one.
 	local vip = GameConfig.VIP
 	local hasVip = player:GetAttribute("VIP") == true
 	MenuUi.addRow(frame, {
@@ -102,7 +104,7 @@ local function refresh()
 
 	if statusLabel then
 		local here = currentZoneName()
-		statusLabel.Text = here and ("You are in: %s"):format(here) or "You are in the open arena"
+		statusLabel.Text = here and ("You are in: %s"):format(here) or "You are in the hub arena"
 	end
 end
 Zones.refresh = refresh
@@ -116,7 +118,7 @@ local function watchPosition()
 			if not frame.Visible then continue end
 			if statusLabel then
 				local here = currentZoneName()
-				statusLabel.Text = here and ("You are in: %s"):format(here) or "You are in the open arena"
+				statusLabel.Text = here and ("You are in: %s"):format(here) or "You are in the hub arena"
 			end
 		end
 		watching = false

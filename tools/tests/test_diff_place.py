@@ -55,16 +55,19 @@ def test_place_ahead_is_reported(tmp_path):
 
 
 def test_place_ahead_zone_geometry_is_reported(gamedata, tmp_path):
-    """Moving a dais in Studio changes the food pool: that is the drift to catch."""
+    """Resizing an arena in Studio changes its food pool: that is the drift to
+    catch. The geometry lives on the arena's Floor slab."""
     raw = read(PLACE)
     items, order = rbxlx.parse(rbxlx.mask_cdata(raw))
-    ref = rbxlx.find(items, order, "Workspace/Zones/Greenfield")
+    ref = rbxlx.find(items, order, "Workspace/Zones/Greenfield/Floor")
     assert ref
     a, b = items[ref]["start"], items[ref]["end"]
     block = raw[a:b]
     before = block
-    block = block.replace("<X>144</X>", "<X>200</X>", 1)
-    assert block != before, "the dais size property was not found"
+    # Both axes: the radius the game reads is half the shorter side, so stretching
+    # one axis only would leave the zone exactly as it was.
+    block = block.replace("<X>400</X>", "<X>520</X>", 1).replace("<Z>400</Z>", "<Z>520</Z>", 1)
+    assert block != before, "the floor size property was not found"
     path = write(tmp_path / "moved.rbxlx", raw[:a] + block + raw[b:])
 
     code, out = run(DIFF, "--place", path, "--gamedata", GAMEDATA, "--strict", expect=None)
@@ -79,7 +82,7 @@ def test_json_dump(tmp_path):
         got = json.load(f)
     assert got["settings"]["GameName"] == "Eat The Cube"
     assert got["zones"]["Greenfield"]["Id"] == 1.0
-    assert got["zones"]["Greenfield"]["Top"] == 0.05
+    assert got["zones"]["Greenfield"]["Top"] == 0.0
     assert got["menuFrames"]["Rebirth"] == {"Button": True, "Frame": True}
     with open(GAMEDATA, encoding="utf-8") as f:
         want = json.load(f)

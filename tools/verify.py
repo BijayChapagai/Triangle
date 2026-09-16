@@ -402,6 +402,7 @@ REQUIRED_ASSETS = [
     ("ServerStorage/Character/PlayerDisplay/PlayerName", "name tag"),
     ("ServerStorage/Character/PlayerDisplay/PlayerSize", "size/rank tag"),
     ("Workspace/Spawns", "spawn points"),
+    ("Workspace/Zones", "the zone arenas"),
     ("Workspace/VIPDoor", "VIP wing door"),
     ("Workspace/VIPDoor/ClickPart/ClickDetector", "server side VIP prompt"),
     ("ReplicatedStorage/GameData", "all game content"),
@@ -464,6 +465,9 @@ REQUIRED_ASSETS = [
     ("StarterGui/Frames/Quests/ClaimAll", "claim every ready quest"),
     ("StarterGui/Frames/Quests/Status", "daily reset countdown"),
 ]
+
+# Two arenas closer than this read as one arena with a wall down the middle.
+MIN_ARENA_GAP = 100
 
 BANNED = [
     (re.compile(r"^\s*//[^\n]*", re.M), "// comment (Lua uses --)"),
@@ -826,6 +830,120 @@ def main():
     admins = child_names(items, by_path["ReplicatedStorage/GameData/Admins"][0])
     if not admins:
         problems.append("GameData/Admins is empty - nobody can use the console")
+    # ---- 4d. every zone is its own arena ----------------------------------
+    # A zone used to be a coloured pad inside the hub arena. It is now a walled
+    # arena of its own, generated from gamedata.json, and the arena is a promise:
+    # a floor Food can spawn on, walls tall enough to hold a MaxCubeSize cube in,
+    # a sign that states the requirement, Persistent streaming so the client can
+    # list arenas it is 1500 studs away from, and enough space between neighbours
+    # that two zones never share ground - or cubes.
+    cfg = gd["settings"]
+    floor_y = float(cfg["FloorY"])
+    slab = float(cfg["ZoneFloorThickness"])
+    wall_h = float(cfg["ZoneWallHeight"])
+    wall_t = float(cfg["ZoneWallThickness"])
+
+    def vec3_of(inner):
+        vals = re.findall(r"<[XYZ]>([-\d.eE+]+)</[XYZ]>", inner or "")
+        return tuple(float(v) for v in vals) if len(vals) == 3 else None
+
+    def near(got, want, tol=0.01):
+        return got is not None and abs(float(got) - float(want)) <= tol
+
+    boxes = []
+    for zone in gd["zones"]:
+        name = zone["name"]
+        zpath = "Workspace/Zones/%s" % name
+        ref = by_path.get(zpath, [None])[0]
+        if ref is None:
+            problems.append("%s is missing - the zone has no arena" % zpath)
+            continue
+        if items[ref]["class"] != "Model":
+            problems.append("%s is a %s; an arena is a Model so Studio can move it as one thing"
+                            % (zpath, items[ref]["class"]))
+        if prop_of(zpath, "ModelStreamingMode") != "2":
+            problems.append("%s is not Persistent (ModelStreamingMode 2): it streams out and the "
+                            "Zones menu loses the arena while the player is in the hub" % zpath)
+
+        cx, cz = float(zone["center"][0]), float(zone["center"][1])
+        r = float(zone["radius"])
+        # The overlap check runs on the arena AS BUILT, so dragging one onto the
+        # hub in Studio is caught even though gamedata.json still looks fine.
+        box = (name, cx - r - wall_t, cx + r + wall_t, cz - r - wall_t, cz + r + wall_t)
+
+        floor = "%s/Floor" % zpath
+        if floor not in by_path:
+            problems.append("%s has no Floor slab - Food and Progression read the zone off it"
+                            % zpath)
+            boxes.append(box)
+            continue
+        pos, size = vec3_of(prop_of(floor, "CFrame")), vec3_of(prop_of(floor, "size"))
+        if not pos or not size:
+            problems.append("%s has no readable geometry" % floor)
+            boxes.append(box)
+            continue
+        boxes.append((name, pos[0] - size[0] / 2.0 - wall_t, pos[0] + size[0] / 2.0 + wall_t,
+                      pos[2] - size[2] / 2.0 - wall_t, pos[2] + size[2] / 2.0 + wall_t))
+        if not (near(pos[0], cx) and near(pos[2], cz) and near(pos[1], floor_y - slab / 2.0)):
+            problems.append("%s sits at %s; gamedata puts this arena at (%g, %g) on FloorY"
+                            % (floor, tuple(round(v, 2) for v in pos), cx, cz))
+        if not (near(size[0], 2 * r) and near(size[2], 2 * r) and near(size[1], slab)):
+            problems.append("%s is %s; gamedata says a %g stud square, %g thick"
+                            % (floor, tuple(round(v, 2) for v in size), 2 * r, slab))
+        want_uint = ((int(zone["color"][0]) << 16) | (int(zone["color"][1]) << 8)
+                     | int(zone["color"][2]))
+        got_uint = prop_of(floor, "Color3uint8")
+        if got_uint is None or int(got_uint) != want_uint:
+            problems.append("%s is colour %s, not the zone colour %d" % (floor, got_uint, want_uint))
+        if "%s/Texture" % floor not in by_path:
+            problems.append("%s has no texture; every shipped Baseplate wears one" % floor)
+
+        sign = "%s/Sign" % floor
+        if sign not in by_path:
+            problems.append("%s has no Sign - an arena must state its requirement in world" % floor)
+        else:
+            text = prop_of("%s/Label" % sign, "Text") or ""
+            for word in (name, zone["rarity"]):
+                if word not in text:
+                    problems.append("%s/Label does not mention %r" % (sign, word))
+
+        for wall, wx, wz, wsize in (
+                ("WallEast", cx + r + wall_t / 2.0, cz, (wall_t, wall_h, 2 * r + 2 * wall_t)),
+                ("WallWest", cx - r - wall_t / 2.0, cz, (wall_t, wall_h, 2 * r + 2 * wall_t)),
+                ("WallNorth", cx, cz + r + wall_t / 2.0, (2 * r, wall_h, wall_t)),
+                ("WallSouth", cx, cz - r - wall_t / 2.0, (2 * r, wall_h, wall_t))):
+            wpath = "%s/%s" % (zpath, wall)
+            if wpath not in by_path:
+                problems.append("%s has no %s - cubes and players leave the arena" % (zpath, wall))
+                continue
+            wpos, wsize_got = vec3_of(prop_of(wpath, "CFrame")), vec3_of(prop_of(wpath, "size"))
+            if not wpos or not wsize_got:
+                problems.append("%s has no readable geometry" % wpath)
+                continue
+            if not (near(wpos[0], wx) and near(wpos[2], wz)
+                    and near(wpos[1], floor_y + wall_h / 2.0)):
+                problems.append("%s is at %s, not flush with the slab edge at (%g, %g)"
+                                % (wpath, tuple(round(v, 2) for v in wpos), wx, wz))
+            if not all(near(wsize_got[i], wsize[i]) for i in range(3)):
+                problems.append("%s is %s; the shipped walls are %g thick and %g tall"
+                                % (wpath, tuple(round(v, 2) for v in wsize_got), wall_t, wall_h))
+            if len(by_path.get("%s/Texture" % wpath, [])) != 6:
+                problems.append("%s has %d textures; the shipped walls texture all six faces"
+                                % (wpath, len(by_path.get("%s/Texture" % wpath, []))))
+
+    # The hub arena is shipped geometry: walls at WallInnerX/WallInnerZ, with the
+    # VIP wing reaching out to VipRegionMaxX. Nothing generated may sit on it.
+    hub_x = max(float(cfg["WallInnerX"]), float(cfg["VipRegionMaxX"])) + wall_t
+    hub_z = float(cfg["WallInnerZ"]) + wall_t
+    boxes.insert(0, ("the hub arena", -hub_x, hub_x, -hub_z, hub_z))
+    for i, (a_name, a0, a1, a2, a3) in enumerate(boxes):
+        for b_name, b0, b1, b2, b3 in boxes[i + 1:]:
+            gap = max(max(a0, b0) - min(a1, b1), max(a2, b2) - min(a3, b3))
+            if gap < MIN_ARENA_GAP:
+                problems.append("%s and %s are %.0f studs apart; arenas need %d of clear ground "
+                                "so no zone shares food (or a wall) with its neighbour"
+                                % (a_name, b_name, gap, MIN_ARENA_GAP))
+
 
     # ---- report -----------------------------------------------------------
     print("place      %s (%.2f MB)" % (os.path.basename(args.place), len(raw) / 1048576))

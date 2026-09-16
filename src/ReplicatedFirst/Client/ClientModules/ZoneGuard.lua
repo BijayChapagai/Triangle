@@ -2,9 +2,9 @@
 -- in a zone they have not unlocked.
 --
 -- The server already refuses the food and the teleport. This exists so the gate
--- does not feel arbitrary: the dais sign states the requirement, and standing on
--- the dais says the same thing in the middle of the screen. Both the tint and the
--- label are asset (StarterGui/ZoneWarn), so the look is a Studio edit.
+-- does not feel arbitrary: the arena sign states the requirement, and standing
+-- inside the arena says the same thing in the middle of the screen. Both the tint
+-- and the label are asset (StarterGui/ZoneWarn), so the look is a Studio edit.
 local ZoneGuard = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -23,12 +23,12 @@ local function sizeValue()
 end
 
 -- Name of the zone a position is inside plus why it is locked ("" when open).
--- The VIP wing is a pseudo-zone, so it is tested by region rather than radius.
+-- Zones are square arenas (radius = half a side) and the VIP wing is a
+-- pseudo-zone, so both are tested by region rather than by radius.
 local function zoneAt(position)
 	for _, zone in ipairs(GameConfig.zones()) do
-		local dx = position.X - zone.center[1]
-		local dz = position.Z - zone.center[3]
-		if (dx * dx + dz * dz) <= (zone.radius * zone.radius) then
+		if math.abs(position.X - zone.center[1]) <= zone.radius
+			and math.abs(position.Z - zone.center[3]) <= zone.radius then
 			return zone.name, GameConfig.zoneLockReason(zone, sizeValue(),
 				player:GetAttribute("Rebirths") or 0)
 		end
@@ -88,9 +88,9 @@ function ZoneGuard.Init(c)
 				continue
 			end
 
-			-- Requirements are re-read every tick, so unlocking while standing on
-			-- the dais (a rebirth, a size milestone, buying VIP) clears the warning
-			-- without the player having to step off.
+			-- Requirements are re-read every tick, so unlocking while standing in
+			-- the arena (a rebirth, a size milestone, buying VIP) clears the warning
+			-- without the player having to travel out.
 			local name, reason = zoneAt(root.Position)
 			if name and reason ~= "" then
 				show(name, reason)

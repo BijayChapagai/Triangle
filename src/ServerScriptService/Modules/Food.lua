@@ -2,11 +2,12 @@
 --
 -- workspace/FoodParts ships empty; this module fills it from the region plan and
 -- keeps every pool topped up. Regions come from the place itself:
---   * open arena   inset from the 87-stud walls (Settings) so nothing spawns over
---                  the void, and kept OFF the zone daises so each dais reads as
---                  its own rarity tier
---   * zone daises  workspace/Zones/<Name> - the part IS the region, so moving or
---                  resizing a dais in Studio moves its food pool
+--   * hub arena    inset from the 87-stud walls (Settings) so nothing spawns over
+--                  the void; mixed rarity, the pool everybody starts in
+--   * zone arenas  workspace/Zones/<Name>/Floor - the slab IS the region, so
+--                  moving or resizing an arena in Studio moves its food pool.
+--                  Each arena is walled, stands far from the hub, and holds only
+--                  its own rarity
 --   * VIP wing     beyond workspace/VIPDoor, denser and Rare-or-better
 --
 -- Pickup is handled here too, with the same zone gate the teleport uses.
@@ -44,7 +45,10 @@ local function bump(zoneId, delta)
 end
 
 --// ------------------------------------------------------------------- regions
-local function daisRegion(zone)
+-- The inside of a zone arena: its floor slab, minus a lip so a cube never spawns
+-- intersecting a wall. The walls stand just outside the slab, so the slab's half
+-- width is the arena's half width and one inset covers both.
+local function zoneRegion(zone)
 	local r = math.max(2, zone.radius - 2)
 	return {
 		minX = math.floor(zone.center[1] - r),
@@ -54,18 +58,9 @@ local function daisRegion(zone)
 	}
 end
 
-local function inside(region, x, z)
-	return x >= region.minX and x <= region.maxX and z >= region.minZ and z <= region.maxZ
-end
-
--- { zoneId, region, floorY, target, pick(), avoid }
+-- { zoneId, region, floorY, target, pick() }
 local function buildPlan()
 	local plan = {}
-
-	local avoid = {}
-	for _, zone in ipairs(GameConfig.zones()) do
-		table.insert(avoid, daisRegion(zone))
-	end
 
 	table.insert(plan, {
 		zoneId = ARENA_ZONE_ID,
@@ -73,13 +68,12 @@ local function buildPlan()
 		floorY = GameConfig.MAP.FloorY,
 		target = C.BaseFoodTarget,
 		pick = function() return GameConfig.pickRarity() end,
-		avoid = avoid,
 	})
 
 	for _, zone in ipairs(GameConfig.zones()) do
 		table.insert(plan, {
 			zoneId = zone.id,
-			region = daisRegion(zone),
+			region = zoneRegion(zone),
 			floorY = zone.topY,
 			target = C.ZoneFoodTarget,
 			pick = (function(rarity) return function() return rarity end end)(zone.rarity),
@@ -106,22 +100,7 @@ local PLAN = {}
 
 local function pickPosition(entry)
 	local region = entry.region
-	local x = math.random(region.minX, region.maxX)
-	local z = math.random(region.minZ, region.maxZ)
-	if not entry.avoid then return x, z end
-
-	-- Retry a few times to keep generic arena food off the rarity daises. A rare
-	-- overlap is harmless, so there is no point looping until it is perfect.
-	for _ = 1, 6 do
-		local blocked = false
-		for _, rect in ipairs(entry.avoid) do
-			if inside(rect, x, z) then blocked = true break end
-		end
-		if not blocked then return x, z end
-		x = math.random(region.minX, region.maxX)
-		z = math.random(region.minZ, region.maxZ)
-	end
-	return x, z
+	return math.random(region.minX, region.maxX), math.random(region.minZ, region.maxZ)
 end
 
 --// ------------------------------------------------------------------ spawning
@@ -192,8 +171,9 @@ end
 
 --// ------------------------------------------------------------------- pickup
 local function eat(food, player)
-	-- Zone/VIP gating is per cube, not per position: walking into a locked dais
-	-- (they have no walls) must not hand out its rarity tier for free.
+	-- Zone/VIP gating is per cube, not per position. Arenas are walled and the
+	-- teleport is gated, so this is the last line of defence: an admin teleport, a
+	-- moved arena or a future gateway must never hand out a locked rarity tier.
 	local zoneId = food:GetAttribute("Zone") or 0
 	if zoneId ~= 0 then
 		local allowed, reason = Progression.CanUseZone(player, zoneId)

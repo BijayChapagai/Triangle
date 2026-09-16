@@ -156,10 +156,12 @@ def actual(place, gd):
     for name, cls, _ref in place.children("Workspace/Zones"):
         base = "Workspace/Zones/" + name
         entry = place.value(base) or {}
-        pos, size = place.geometry(base)
+        # A zone is an arena Model and its Floor slab is the geometry the game
+        # reads; a hand built zone may still be a bare Part.
+        pos, size = place.geometry(base if cls == "Part" else base + "/Floor")
         if pos and size:
             entry["Center"] = [round(pos[0], 3), round(pos[2], 3)]
-            entry["Radius"] = round(size[0] / 2.0, 3)
+            entry["Radius"] = round(min(size[0], size[2]) / 2.0, 3)
             entry["Top"] = round(pos[1] + size[1] / 2.0, 3)
         zones[name] = entry
     out["zones"] = zones
@@ -209,7 +211,7 @@ def expected(gd):
                         for k, v in gd.get("prefs", {}).items())
     out["events"] = sorted(gd["events"])
 
-    floor_y = float(gd["settings"]["ZoneFloorY"])
+    floor_y = float(gd["settings"]["FloorY"])
     out["zones"] = dict((z["name"], {"Id": float(z["id"]), "Rarity": z["rarity"],
                                      "ReqSize": float(z.get("reqSize", 0)),
                                      "ReqRebirth": float(z.get("reqRebirth", 0)),
