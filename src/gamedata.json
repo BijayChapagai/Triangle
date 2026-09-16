@@ -1,0 +1,709 @@
+{
+  "_readme": [
+    "Single source of truth for the game's CONTENT. tools/build.py turns this file",
+    "into real instances inside ReplicatedStorage/GameData (plus the map geometry,",
+    "menu buttons/frames and RemoteEvents). At runtime nothing reads this JSON:",
+    "the server and client read the GameData instances, so after a build you can",
+    "tune the game in Studio (values, colours, prices, zones, quests...) without",
+    "touching a single line of Lua.",
+    "Edit this file only if you want the change to survive a rebuild."
+  ],
+  "settings": {
+    "BaseFoodTarget": 420,
+    "CameraFov": 70,
+    "CameraFovPunch": 6,
+    "CameraPunchThreshold": 40,
+    "CameraPunchTime": 0.35,
+    "CashPerCubeBase": 1,
+    "CashPerCubePerRebirth": 1,
+    "DataStoreName": "Yeah",
+    "FloorY": 0,
+    "GameName": "Eat The Cube",
+    "GroupId": 34195654,
+    "KillCash": 25,
+    "KillSizeCap": 25000,
+    "KillSizeTransfer": 0.1,
+    "LeaderboardSize": 50,
+    "LeaderboardThrottle": 5,
+    "LeaderboardTtl": 20,
+    "LeaderboardWriteInterval": 30,
+    "MaxCubeSize": 220,
+    "NotifyLifetime": 3.5,
+    "NotifyMax": 5,
+    "RankRebirthScale": 0.6,
+    "RebirthAdd": 200,
+    "RebirthBase": 250,
+    "RebirthCashPerLevel": 250,
+    "RebirthExponent": 2.6,
+    "RebirthMultStep": 0.12,
+    "RespawnCooldown": 1,
+    "SeedBatch": 40,
+    "SizeTweenTime": 0.22,
+    "SpawnBatch": 10,
+    "SpawnInterval": 1.5,
+    "SpawnRegionMaxX": 272,
+    "SpawnRegionMaxZ": 322,
+    "SpawnRegionMinX": -272,
+    "SpawnRegionMinZ": -322,
+    "VipFoodTarget": 130,
+    "VipRarityFloor": "Rare",
+    "VipRegionMaxX": 405,
+    "VipRegionMaxZ": 60,
+    "VipRegionMinX": 288,
+    "VipRegionMinZ": -56,
+    "VipTeleportX": 350,
+    "VipTeleportZ": 2,
+    "VipZoneId": 6,
+    "VisualSizeFactor": 0.12,
+    "WallInnerX": 278.5,
+    "WallInnerZ": 328.5,
+    "ZoneFloorY": 0.05,
+    "ZoneFoodTarget": 60
+  },
+  "admins": [
+    {
+      "name": "Owner",
+      "userId": 7362557250,
+      "role": "owner"
+    }
+  ],
+  "ranks": [
+    {
+      "name": "Cube",
+      "threshold": 0
+    },
+    {
+      "name": "Block",
+      "threshold": 60
+    },
+    {
+      "name": "Big Cube",
+      "threshold": 180
+    },
+    {
+      "name": "Huge Cube",
+      "threshold": 500
+    },
+    {
+      "name": "Mega Cube",
+      "threshold": 1200
+    },
+    {
+      "name": "Titan Cube",
+      "threshold": 3000
+    },
+    {
+      "name": "Colossus",
+      "threshold": 7000
+    },
+    {
+      "name": "Galaxy Cube",
+      "threshold": 16000
+    },
+    {
+      "name": "Void Cube",
+      "threshold": 40000
+    },
+    {
+      "name": "God Cube",
+      "threshold": 100000
+    },
+    {
+      "name": "Omni Cube",
+      "threshold": 250000
+    }
+  ],
+  "rarities": [
+    {
+      "name": "Common",
+      "weight": 62,
+      "value": 5,
+      "size": 1.0,
+      "color": [
+        255,
+        70,
+        130
+      ]
+    },
+    {
+      "name": "Rare",
+      "weight": 24,
+      "value": 28,
+      "size": 1.7,
+      "color": [
+        60,
+        170,
+        255
+      ]
+    },
+    {
+      "name": "Epic",
+      "weight": 10,
+      "value": 110,
+      "size": 2.4,
+      "color": [
+        180,
+        90,
+        255
+      ]
+    },
+    {
+      "name": "Legendary",
+      "weight": 3.5,
+      "value": 400,
+      "size": 3.2,
+      "color": [
+        255,
+        205,
+        50
+      ]
+    },
+    {
+      "name": "Mythic",
+      "weight": 0.5,
+      "value": 1500,
+      "size": 4.2,
+      "color": [
+        255,
+        95,
+        35
+      ]
+    }
+  ],
+  "skins": [
+    {
+      "id": "Default",
+      "color": [
+        255,
+        0,
+        80
+      ],
+      "unlock": "start",
+      "req": 0
+    },
+    {
+      "id": "Emerald",
+      "color": [
+        0,
+        255,
+        140
+      ],
+      "unlock": "size",
+      "req": 200
+    },
+    {
+      "id": "Sapphire",
+      "color": [
+        40,
+        120,
+        255
+      ],
+      "unlock": "size",
+      "req": 1500
+    },
+    {
+      "id": "Obsidian",
+      "color": [
+        35,
+        35,
+        45
+      ],
+      "unlock": "cash",
+      "req": 2500
+    },
+    {
+      "id": "Gold",
+      "color": [
+        255,
+        215,
+        0
+      ],
+      "unlock": "cash",
+      "req": 12000
+    },
+    {
+      "id": "Crimson",
+      "color": [
+        220,
+        20,
+        60
+      ],
+      "unlock": "cash",
+      "req": 40000
+    },
+    {
+      "id": "Shadow",
+      "color": [
+        70,
+        40,
+        120
+      ],
+      "unlock": "cash",
+      "req": 100000
+    },
+    {
+      "id": "Galaxy",
+      "color": [
+        150,
+        0,
+        255
+      ],
+      "unlock": "rebirth",
+      "req": 1
+    },
+    {
+      "id": "Inferno",
+      "color": [
+        255,
+        70,
+        0
+      ],
+      "unlock": "rebirth",
+      "req": 3
+    },
+    {
+      "id": "Frost",
+      "color": [
+        120,
+        230,
+        255
+      ],
+      "unlock": "rebirth",
+      "req": 5
+    },
+    {
+      "id": "Void",
+      "color": [
+        90,
+        0,
+        170
+      ],
+      "unlock": "rebirth",
+      "req": 10
+    }
+  ],
+  "zones": [
+    {
+      "id": 1,
+      "name": "Greenfield",
+      "color": [
+        80,
+        220,
+        120
+      ],
+      "rarity": "Common",
+      "reqSize": 0,
+      "reqRebirth": 0,
+      "center": [
+        0,
+        0
+      ],
+      "radius": 72
+    },
+    {
+      "id": 2,
+      "name": "Crystal Cave",
+      "color": [
+        80,
+        200,
+        255
+      ],
+      "rarity": "Rare",
+      "reqSize": 300,
+      "reqRebirth": 0,
+      "center": [
+        -220,
+        -220
+      ],
+      "radius": 52
+    },
+    {
+      "id": 3,
+      "name": "Lava Forge",
+      "color": [
+        255,
+        130,
+        40
+      ],
+      "rarity": "Epic",
+      "reqSize": 1500,
+      "reqRebirth": 0,
+      "center": [
+        220,
+        -220
+      ],
+      "radius": 52
+    },
+    {
+      "id": 4,
+      "name": "Frozen Peak",
+      "color": [
+        150,
+        230,
+        255
+      ],
+      "rarity": "Legendary",
+      "reqSize": 0,
+      "reqRebirth": 2,
+      "center": [
+        -220,
+        220
+      ],
+      "radius": 52
+    },
+    {
+      "id": 5,
+      "name": "Void Core",
+      "color": [
+        175,
+        70,
+        255
+      ],
+      "rarity": "Mythic",
+      "reqSize": 0,
+      "reqRebirth": 5,
+      "center": [
+        220,
+        220
+      ],
+      "radius": 52
+    }
+  ],
+  "quests": [
+    {
+      "id": "eat100",
+      "type": "eat",
+      "goal": 100,
+      "rewardCash": 500,
+      "rewardSkin": "",
+      "text": "Eat 100 cubes"
+    },
+    {
+      "id": "eat750",
+      "type": "eat",
+      "goal": 750,
+      "rewardCash": 2500,
+      "rewardSkin": "",
+      "text": "Eat 750 cubes"
+    },
+    {
+      "id": "kill3",
+      "type": "kill",
+      "goal": 3,
+      "rewardCash": 1200,
+      "rewardSkin": "",
+      "text": "Eliminate 3 players"
+    },
+    {
+      "id": "size500",
+      "type": "size",
+      "goal": 500,
+      "rewardCash": 1500,
+      "rewardSkin": "",
+      "text": "Reach Size 500"
+    },
+    {
+      "id": "size5000",
+      "type": "size",
+      "goal": 5000,
+      "rewardCash": 8000,
+      "rewardSkin": "",
+      "text": "Reach Size 5000"
+    },
+    {
+      "id": "rebirth1",
+      "type": "rebirth",
+      "goal": 1,
+      "rewardCash": 0,
+      "rewardSkin": "Galaxy",
+      "text": "Rebirth once (unlocks the Galaxy skin)"
+    }
+  ],
+  "gifts": [
+    {
+      "id": 1,
+      "requiredTime": 60,
+      "reward": 100,
+      "type": "Size"
+    },
+    {
+      "id": 2,
+      "requiredTime": 180,
+      "reward": 200,
+      "type": "Cash"
+    },
+    {
+      "id": 3,
+      "requiredTime": 600,
+      "reward": 350,
+      "type": "Size"
+    },
+    {
+      "id": 4,
+      "requiredTime": 1200,
+      "reward": 500,
+      "type": "Cash"
+    },
+    {
+      "id": 5,
+      "requiredTime": 2700,
+      "reward": 5000,
+      "type": "Size"
+    },
+    {
+      "id": 6,
+      "requiredTime": 5400,
+      "reward": 6200,
+      "type": "Size"
+    },
+    {
+      "id": 7,
+      "requiredTime": 6300,
+      "reward": 1200,
+      "type": "Cash"
+    },
+    {
+      "id": 8,
+      "requiredTime": 7200,
+      "reward": 15000,
+      "type": "Size"
+    },
+    {
+      "id": 9,
+      "requiredTime": 8400,
+      "reward": 3500,
+      "type": "Cash"
+    },
+    {
+      "id": 10,
+      "requiredTime": 10800,
+      "reward": 30000,
+      "type": "Size"
+    }
+  ],
+  "codes": [
+    {
+      "code": "RELEASE",
+      "cash": 200
+    },
+    {
+      "code": "FREEMONEY",
+      "cash": 350
+    },
+    {
+      "code": "CUBES",
+      "cash": 400
+    },
+    {
+      "code": "EATCUBE",
+      "cash": 750
+    }
+  ],
+  "products": [
+    {
+      "id": "Size5k",
+      "productId": 2662840537,
+      "kind": "size",
+      "amount": 5000,
+      "label": "+5,000 Size"
+    },
+    {
+      "id": "Size25k",
+      "productId": 2662840538,
+      "kind": "size",
+      "amount": 25000,
+      "label": "+25,000 Size"
+    },
+    {
+      "id": "Size80k",
+      "productId": 2660172572,
+      "kind": "size",
+      "amount": 80000,
+      "label": "+80,000 Size"
+    },
+    {
+      "id": "KillAll",
+      "productId": 2662841571,
+      "kind": "killall",
+      "amount": 0,
+      "label": "Kill All"
+    },
+    {
+      "id": "Revive",
+      "productId": 2662841572,
+      "kind": "revive",
+      "amount": 0,
+      "label": "Revive (keep size)"
+    },
+    {
+      "id": "Revenge",
+      "productId": 2662841573,
+      "kind": "revenge",
+      "amount": 0,
+      "label": "Revenge"
+    }
+  ],
+  "gamepasses": [
+    {
+      "id": "DoubleSpeed",
+      "gamePassId": 976477890,
+      "kind": "speed"
+    },
+    {
+      "id": "DoubleCash",
+      "gamePassId": 976285751,
+      "kind": "cash"
+    },
+    {
+      "id": "Vip",
+      "gamePassId": 975187916,
+      "kind": "vip"
+    }
+  ],
+  "events": [
+    "AttemptCode",
+    "RespawnRequest",
+    "AutoFarm",
+    "PlayTimeReward",
+    "QuestUpdate",
+    "Rebirth",
+    "EquipSkin",
+    "BuySkin",
+    "SkinList",
+    "Leaderboard",
+    "QuestFetch",
+    "QuestClaim",
+    "ZoneTeleport",
+    "Admin",
+    "Notify"
+  ],
+  "menus": [
+    {
+      "name": "Rebirth",
+      "label": "Rebirth",
+      "color": [
+        255,
+        120,
+        40
+      ]
+    },
+    {
+      "name": "Skins",
+      "label": "Skins",
+      "color": [
+        60,
+        200,
+        180
+      ]
+    },
+    {
+      "name": "Quests",
+      "label": "Quests",
+      "color": [
+        110,
+        210,
+        110
+      ]
+    },
+    {
+      "name": "Zones",
+      "label": "Zones",
+      "color": [
+        90,
+        160,
+        245
+      ],
+      "status": true
+    },
+    {
+      "name": "Leaderboard",
+      "label": "Ranks",
+      "color": [
+        170,
+        110,
+        245
+      ]
+    },
+    {
+      "name": "Admin",
+      "label": "Admin",
+      "color": [
+        200,
+        70,
+        70
+      ],
+      "commandBar": true
+    }
+  ],
+  "ui": {
+    "menuGridX": [
+      0.026,
+      0.107
+    ],
+    "menuGridY": [
+      0.757,
+      0.837,
+      0.917
+    ],
+    "buttonSize": [
+      0.075,
+      0.075
+    ],
+    "frameSize": [
+      0.5,
+      0.62
+    ],
+    "panelColor": [
+      22,
+      23,
+      33
+    ],
+    "titleColor": [
+      30,
+      34,
+      52
+    ],
+    "listColor": [
+      16,
+      17,
+      26
+    ],
+    "rowColor": [
+      20,
+      22,
+      34
+    ],
+    "accent": [
+      90,
+      140,
+      255
+    ],
+    "rowHeight": 46
+  },
+  "notifier": {
+    "kinds": {
+      "info": [
+        90,
+        160,
+        245
+      ],
+      "good": [
+        110,
+        220,
+        140
+      ],
+      "bad": [
+        235,
+        90,
+        90
+      ]
+    }
+  },
+  "updateLog": [
+    "Rebrand: triangles are cubes now - Eat The Cube.",
+    "New: 5 rarity zones with their own food pools and entry requirements.",
+    "New: rebirths, 11 skins (size, cash and rebirth unlocks), daily quests.",
+    "New: global Size and Cash leaderboards, VIP wing food, admin console.",
+    "Fixed: food no longer sticks to the map, kills transfer size, gifts and codes actually pay out."
+  ]
+}

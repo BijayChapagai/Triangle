@@ -1,1 +1,0 @@
-return setmetatable({ }, { __mode = &quot;k&quot; })
