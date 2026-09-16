@@ -113,3 +113,49 @@ def test_wrong_place_setting_is_caught(raw, tmp_path):
     code, out = verify(write(tmp_path / "autospawn_true.rbxlx", replace_span(raw, "Players", fn)))
     assert code == 1
     assert "CharacterAutoLoads" in out
+
+
+# A DataStore handle opened at module scope throws during require() when API
+# services are unavailable - Studio on an unpublished place - and takes the whole
+# server down with it. That is exactly how the game broke in Studio once, so the
+# shape is banned rather than merely discouraged.
+def test_module_scope_datastore_is_banned():
+    import verify
+
+    src = 'local SizeStore = DataStoreService:GetOrderedDataStore("CubeLB_Size")\nreturn SizeStore\n'
+    hits = [why for pattern, why in verify.BANNED if pattern.search(verify.strip_comments(src))]
+    assert any("module scope" in why for why in hits), hits
+
+
+def test_lazy_guarded_datastore_is_allowed():
+    import verify
+
+    src = (
+        "local stores = {}\n"
+        "local function getStore(name)\n"
+        "\tlocal ok, store = pcall(DataStoreService.GetOrderedDataStore, DataStoreService, name)\n"
+        "\tif not ok then return nil end\n"
+        "\tstores[name] = store\n"
+        "\treturn store\n"
+        "end\n"
+        "return getStore\n"
+    )
+    hits = [why for pattern, why in verify.BANNED if pattern.search(verify.strip_comments(src))]
+    assert hits == [], hits
+
+
+def test_no_source_opens_a_datastore_at_module_scope():
+    """The rule above is only worth having if the tree currently satisfies it."""
+    import glob
+    import os
+
+    import verify
+
+    offenders = []
+    for path in sorted(glob.glob(os.path.join(SRC, "**", "*.lua"), recursive=True)):
+        with open(path, encoding="utf-8") as f:
+            source = verify.strip_comments(f.read())
+        for pattern, why in verify.BANNED:
+            if "module scope" in why and pattern.search(source):
+                offenders.append(os.path.basename(path))
+    assert offenders == [], offenders

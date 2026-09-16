@@ -472,6 +472,13 @@ BANNED = [
     (re.compile(r"(?<![\w.:])delay\s*\("), "legacy delay() - use task.delay()"),
     (re.compile(r"^\s*assert\(", re.M), "bare assert() kills the whole script"),
     (re.compile(r"\bTODO\b|\bFIXME\b|placeholder", re.I), "unfinished marker"),
+    # Opening a store at module scope runs during require(). In Studio on an
+    # unpublished place (or with API access off) it throws, and the throw takes
+    # the requiring script down - Server.lua dies and every module after it never
+    # loads. Open stores lazily, inside a function, behind pcall.
+    (re.compile(r"^local\s+\w+\s*=\s*DataStoreService\s*:\s*Get\w*DataStore\s*\(", re.M),
+     "DataStore opened at module scope - throws during require() in Studio and "
+     "kills every module loaded after it; open it lazily inside pcall"),
 ]
 
 

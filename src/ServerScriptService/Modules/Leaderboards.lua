@@ -1,5 +1,7 @@
 -- Global leaderboards (OrderedDataStore), cached so the menu is instant and a
--- spammy client cannot make the server re-read DataStores.
+-- spammy client cannot make the server re-read DataStores. Nothing here touches
+-- a DataStore at require time, so the module loads in Studio on an unpublished
+-- place and simply reports empty boards.
 local Players = game:GetService("Players")
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,8 +12,45 @@ local Remotes = require(script.Parent:WaitForChild("Remotes"))
 
 local Leaderboards = {}
 
-local SizeStore = DataStoreService:GetOrderedDataStore("CubeLB_Size")
-local CashStore = DataStoreService:GetOrderedDataStore("CubeLB_Cash")
+local SIZE_STORE = "CubeLB_Size"
+local CASH_STORE = "CubeLB_Cash"
+
+-- Stores are opened lazily and behind pcall. GetOrderedDataStore throws when API
+-- services are unavailable - an unpublished place in Studio, or "Enable Studio
+-- Access to API Services" left off - and a throw at require time takes the whole
+-- server down with it: Server.lua dies on this line and every module after it
+-- never loads. Degrading to empty boards costs one warning instead.
+local stores = {}
+local storeState = nil  -- nil = not probed, false = unavailable, true = available
+
+local function getStore(name)
+	local cached = stores[name]
+	if cached ~= nil then
+		return cached or nil
+	end
+	if storeState == false then
+		stores[name] = false
+		return nil
+	end
+
+	local ok, store = pcall(DataStoreService.GetOrderedDataStore, DataStoreService, name)
+	if not ok or typeof(store) ~= "Instance" then
+		storeState = false
+		stores[name] = false
+		warn(("[Leaderboards] DataStore unavailable (%s) - boards stay empty. Publish the place and enable Studio API access to fill them."):format(tostring(store)))
+		return nil
+	end
+
+	storeState = true
+	stores[name] = store
+	return store
+end
+
+-- False until a store could be opened, so callers can tell "nobody is on the
+-- board yet" apart from "this place cannot reach DataStores".
+function Leaderboards.Available()
+	return getStore(SIZE_STORE) ~= nil
+end
 
 local BOARD_SIZE = tonumber(GameConfig.get("LeaderboardSize", 50)) or 50
 local TTL = tonumber(GameConfig.get("LeaderboardTtl", 20)) or 20
@@ -36,6 +75,8 @@ end
 
 local function readBoard(store)
 	local entries = {}
+	if not store then return entries, false end
+
 	local ok, pages = pcall(function()
 		return store:GetSortedAsync(false, BOARD_SIZE)
 	end)
@@ -53,8 +94,8 @@ local function readBoard(store)
 end
 
 local function refresh()
-	local size, okSize = readBoard(SizeStore)
-	local cash, okCash = readBoard(CashStore)
+	local size, okSize = readBoard(getStore(SIZE_STORE))
+	local cash, okCash = readBoard(getStore(CASH_STORE))
 	if not okSize and not okCash then return false end
 	-- Keep whichever board succeeded before, so a transient DataStore hiccup does
 	-- not blank the UI.
@@ -91,16 +132,19 @@ function Leaderboards.Update(player)
 	local ls = player:FindFirstChild("leaderstats")
 	if not ls or not DataManager.HasProfile(player) then return end
 
+	local sizeStore, cashStore = getStore(SIZE_STORE), getStore(CASH_STORE)
+	if not sizeStore and not cashStore then return end
+
 	local size = ls:FindFirstChild("Size")
 	local sizeVal = size and math.floor(size.Value) or 0
-	if player:GetAttribute("LB_Size") ~= sizeVal then
-		local ok = pcall(function() SizeStore:SetAsync(tostring(player.UserId), sizeVal) end)
+	if sizeStore and player:GetAttribute("LB_Size") ~= sizeVal then
+		local ok = pcall(function() sizeStore:SetAsync(tostring(player.UserId), sizeVal) end)
 		if ok then player:SetAttribute("LB_Size", sizeVal) end
 	end
 
 	local cashVal = math.floor(DataManager.Cash(player))
-	if player:GetAttribute("LB_Cash") ~= cashVal then
-		local ok = pcall(function() CashStore:SetAsync(tostring(player.UserId), cashVal) end)
+	if cashStore and player:GetAttribute("LB_Cash") ~= cashVal then
+		local ok = pcall(function() cashStore:SetAsync(tostring(player.UserId), cashVal) end)
 		if ok then player:SetAttribute("LB_Cash", cashVal) end
 	end
 end
