@@ -222,6 +222,9 @@ local function bootUi()
 	-- Last: it animates food cubes, which only exist once the server has seeded
 	-- them, and it needs nothing from the modules above except the motion pref.
 	run("FoodFx", function(m) m.Init(Client) end)
+	-- Cosmetic and event-driven: it needs Camera and StarterGui/Combo, and it only
+	-- does anything once the server starts sending FoodEaten.
+	run("EatFx", function(m) m.Init(Client) end)
 	run("Tags", function(m) m.Init(Client) end)
 end
 

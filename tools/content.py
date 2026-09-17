@@ -105,11 +105,16 @@ def gamedata(b, gd):
 
     rarities = ""
     for r in gd["rarities"]:
+        per = r.get("personality") or {}
         rarities += folder(b, r["name"],
                            num(b, "Weight", r["weight"], D + 3)
                            + num(b, "Value", r["value"], D + 3)
                            + num(b, "Size", r["size"], D + 3)
-                           + color(b, "Color", r["color"], D + 3),
+                           + color(b, "Color", r["color"], D + 3)
+                           # how the tier feels when eaten: camera kick and the
+                           # PlaybackSpeed EatFx gives the shipped UI blip
+                           + num(b, "Punch", per.get("punch", 0), D + 3)
+                           + num(b, "Pitch", per.get("pitch", 1), D + 3),
                            D + 2)
     sections.append(folder(b, "Rarities", rarities, D + 1))
 
@@ -866,6 +871,49 @@ def zonewarn(b, gd):
     return b.item("ScreenGui", "ZoneWarn", gui_props, children=tint, depth=D)[0]
 
 
+def combo(b, gd):
+    """StarterGui/Combo: the chain counter EatFx drives when you eat fast.
+
+    One centred label in the shipped warning face, hidden until there is a chain
+    to show, with a UIScale child so the pop is a scale tween rather than a
+    rewrite of the label's pixel size. The colour is not baked in: EatFx paints it
+    in the rarity colour of the cube that extended the chain.
+    """
+    ui = gd["ui"]
+    F = fonts(ui)
+    spec = ui.get("combo") or {}
+
+    label_props = {
+        "AnchorPoint": ("Vector2", (0.5, 0.5)),
+        "BackgroundTransparency": 1.0,
+        "BorderSizePixel": 0,
+        "Position": ("UDim2", (0.5, 0, float(spec.get("y", 0.24)), 0)),
+        "Size": ("UDim2", (0, int(spec.get("width", 320)), 0, int(spec.get("height", 78)))),
+        "Visible": False,
+        "ZIndex": 4,
+        "LayoutOrder": 0,
+        "ClipsDescendants": False,
+    }
+    label_props.update(text_overrides("", size=int(spec.get("textSize", 46)), scaled=True,
+                                      x_align=2, color=tuple(spec.get("color", [255, 255, 255])),
+                                      font=F["alt"]))
+
+    label = b.item("TextLabel", "Label", label_props,
+                   children=(ui_stroke(b, tuple(spec.get("stroke", [0, 0, 0])), 5, 0, depth=D + 2)
+                             + text_size(b, int(spec.get("textSize", 46)) + 10, 16, depth=D + 2)
+                             # UIScale is not in the base place, so it is written bare.
+                             + b.bare_item("UIScale", "Pop", [("float", "Scale", 1.0)], depth=D + 2)[0]),
+                   depth=D + 1)[0]
+
+    gui_props = {
+        "DisplayOrder": 8,
+        "Enabled": True,
+        "ResetOnSpawn": False,
+        "ZIndexBehavior": 1,
+    }
+    return b.item("ScreenGui", "Combo", gui_props, children=label, depth=D)[0]
+
+
 # ---------------------------------------------------------------------------
 # notifier (ReplicatedFirst/Client)
 # ---------------------------------------------------------------------------
@@ -1212,7 +1260,7 @@ def build(b, gd):
         "ReplicatedStorage/Events": events(b, gd),
         "StarterGui/Buttons": tab_buttons(b, gd),
         "StarterGui/Frames": menu_frames(b, gd),
-        "StarterGui": killfeed(b, gd) + zonewarn(b, gd),
+        "StarterGui": killfeed(b, gd) + zonewarn(b, gd) + combo(b, gd),
         "Workspace": zones(b, gd),
         "ServerStorage": food_templates(b, gd),
     }

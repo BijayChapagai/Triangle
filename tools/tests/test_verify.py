@@ -340,3 +340,24 @@ def test_zone_arena_floor_must_stay_the_zone_colour(raw, tmp_path):
                              replace_span(raw, "Workspace/Zones/Greenfield/Floor", fn)))
     assert code == 1
     assert "Greenfield/Floor" in out and "zone colour" in out
+
+
+# EatFx drives StarterGui/Combo off the server's FoodEaten. If the label goes
+# missing or ships visible, the chain counter is either dead or stuck on screen -
+# and both look fine in every other check, because nothing else reads that gui.
+def test_missing_combo_counter_is_caught(raw, tmp_path):
+    a, b = span(raw, "StarterGui/Combo/Label")
+    code, out = verify(write(tmp_path / "no_combo.rbxlx", raw[:a] + raw[b:]))
+    assert code == 1
+    assert "StarterGui/Combo/Label" in out
+
+
+def test_visible_combo_counter_is_caught(raw, tmp_path):
+    def fn(block):
+        return block.replace("<bool name=\"Visible\">false</bool>",
+                             "<bool name=\"Visible\">true</bool>", 1)
+
+    code, out = verify(write(tmp_path / "shown_combo.rbxlx",
+                             replace_span(raw, "StarterGui/Combo/Label", fn)))
+    assert code == 1
+    assert "Combo" in out

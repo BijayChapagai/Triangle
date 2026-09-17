@@ -247,6 +247,11 @@ local function eat(food, player)
 	Characters.IncreaseSize(player, value / 50)
 	Progression.AddProgress(player, "eat", 1)
 
+	-- Tell the eater which tier they just ate. Rarity and value are the server's
+	-- numbers, so the client can make a Mythic feel unlike a Common without being
+	-- able to invent a bigger one.
+	Remotes.toClient(player, "FoodEaten", tostring(food:GetAttribute("Rarity") or ""), value)
+
 	-- Smooth shrink-out; the top-up loop refills the region.
 	local ok, err = pcall(function()
 		local tween = TweenService:Create(food, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {

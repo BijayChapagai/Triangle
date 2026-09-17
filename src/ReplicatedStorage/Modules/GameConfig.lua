@@ -251,9 +251,13 @@ if rarityFolder then
 		local value = tonumber(valueOf(entry:FindFirstChild("Value"), 1)) or 1
 		local size = tonumber(valueOf(entry:FindFirstChild("Size"), 1)) or 1
 		local color = colorOf(entry, { 255, 255, 255 })
+		-- How the tier feels when eaten: camera kick (0 = none) and the
+		-- PlaybackSpeed EatFx gives the shipped UI blip.
+		local punch = tonumber(valueOf(entry:FindFirstChild("Punch"), 0)) or 0
+		local pitch = tonumber(valueOf(entry:FindFirstChild("Pitch"), 1)) or 1
 		RARITIES[entry.Name] = {
 			name = entry.Name, weight = weight, value = value, size = size,
-			color = color, rgb = rgbOf(color),
+			color = color, rgb = rgbOf(color), punch = punch, pitch = pitch,
 		}
 		table.insert(RARITY_LIST, RARITIES[entry.Name])
 	end
@@ -261,6 +265,16 @@ end
 table.sort(RARITY_LIST, function(a, b) return a.value < b.value end)
 GameConfig.RARITIES = RARITIES
 GameConfig.RARITY_LIST = RARITY_LIST
+
+-- How fast eating chains, and how far the chain escalates the feedback. A chain
+-- that never escalates is just a counter; one that escalates forever turns the
+-- screen into a strobe, so the steps are capped.
+GameConfig.COMBO = {
+	window = tonumber(setting("ComboWindow", 2.5)) or 2.5,
+	punchStep = tonumber(setting("ComboPunchStep", 0.05)) or 0.05,
+	maxSteps = tonumber(setting("ComboMaxSteps", 20)) or 20,
+	pitchStep = tonumber(setting("ComboPitchStep", 0.015)) or 0.015,
+}
 
 -- pick a rarity key, optionally raising the floor (the VIP wing)
 function GameConfig.pickRarity(floorTier: string?): string

@@ -433,6 +433,8 @@ REQUIRED_ASSETS = [
     ("StarterGui/Buttons/Store", "size pack buttons"),
     ("StarterGui/Buttons/2xCash", "x2 cash pass button"),
     ("StarterGui/Buttons/2xSpeed", "x2 speed pass button"),
+    ("StarterGui/Combo/Label", "eat chain counter"),
+    ("StarterGui/Combo/Label/Pop", "chain pop scale"),
     ("StarterGui/Currency/Cash/Label", "cash readout"),
     # death screen
     ("StarterGui/DeathGui/DeathFrame/Content/DeathInfo", "death message"),
@@ -983,6 +985,53 @@ def main():
                                     "move at least as much"
                                     % (motion_seen[i][0], key, higher[key],
                                        motion_seen[i - 1][0], lower[key]))
+
+    # ---- 4f (cont.): eating a tier has to feel like that tier --------------
+    # EatFx drives StarterGui/Combo from the server's FoodEaten, so a missing
+    # label silently kills the chain counter. Punch and pitch must escalate with
+    # the tier - a Mythic that kicks less than a Common is the same class of bug
+    # as a duller cube - and the cheapest tier must not punch at all, because it
+    # is eaten every couple of seconds and a shake that often is sickening.
+    combo_label = by_path.get("StarterGui/Combo/Label", [None])[0]
+    if combo_label is None:
+        problems.append("StarterGui/Combo/Label is missing - EatFx has no chain counter to drive")
+    elif (prop_of("StarterGui/Combo/Label", "Visible") or "").strip().lower() == "true":
+        problems.append("StarterGui/Combo/Label ships visible; it is hidden until a chain starts")
+
+    combo_window = settings.get("ComboWindow")
+    if combo_window is None or not 0 < float(combo_window) <= 10:
+        problems.append("settings.ComboWindow is %r; it must be between 0 and 10 seconds or a "
+                        "chain either never forms or never ends" % (combo_window,))
+
+    steps = float(settings.get("ComboMaxSteps", 0) or 0)
+    pitch_step = float(settings.get("ComboPitchStep", 0) or 0)
+    feedback_seen = []
+    for index, rarity in enumerate(gd["rarities"]):
+        per = rarity.get("personality") or {}
+        punch = float(per.get("punch", 0))
+        pitch = float(per.get("pitch", 1))
+        if not 0 <= punch <= 2:
+            problems.append("%s punch is %r; it is a multiple of CameraFovPunch and belongs in 0-2"
+                            % (rarity["name"], per.get("punch")))
+        if not 0.5 <= pitch <= 3:
+            problems.append("%s pitch is %r; a Sound PlaybackSpeed outside 0.5-3 stops being a blip"
+                            % (rarity["name"], per.get("pitch")))
+        feedback_seen.append((rarity["name"], index, punch, pitch))
+
+    if feedback_seen:
+        bottom, top = feedback_seen[0], feedback_seen[-1]
+        if bottom[2] != 0:
+            problems.append("%s punch is %r; the cheapest tier is eaten constantly and must not "
+                            "shake the camera" % (bottom[0], bottom[2]))
+        if top[2] <= 0:
+            problems.append("%s punch is %r; the rarest cube has to kick" % (top[0], top[2]))
+        if top[3] + steps * pitch_step > 3:
+            problems.append("a %d-cube chain pushes %s's blip to PlaybackSpeed %.2f, past the 3 a "
+                            "Sound plays cleanly" % (int(steps) + 1, top[0], top[3] + steps * pitch_step))
+        for prev, cur in zip(feedback_seen, feedback_seen[1:]):
+            if cur[2] < prev[2] or cur[3] < prev[3]:
+                problems.append("%s feels weaker than %s (punch %r vs %r, pitch %r vs %r)"
+                                % (cur[0], prev[0], cur[2], prev[2], cur[3], prev[3]))
 
     # ---- 4g. billboards hold their size on screen ---------------------------
     # A BillboardGui sized in scale units is world-sized: it shrinks as you walk

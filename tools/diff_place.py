@@ -225,7 +225,9 @@ def expected(gd):
                          for a in gd["admins"])
     out["ranks"] = dict((r["name"], float(r["threshold"])) for r in gd["ranks"])
     out["rarities"] = dict((r["name"], {"Weight": float(r["weight"]), "Value": float(r["value"]),
-                                        "Size": float(r["size"]), "Color": list(r["color"])})
+                                        "Size": float(r["size"]), "Color": list(r["color"]),
+                                        "Punch": float((r.get("personality") or {}).get("punch", 0)),
+                                        "Pitch": float((r.get("personality") or {}).get("pitch", 1))})
                            for r in gd["rarities"])
     out["skins"] = dict((s["id"], {"Color": list(s["color"]), "Unlock": s["unlock"],
                                    "Req": float(s.get("req", 0)), "Order": float(i)})

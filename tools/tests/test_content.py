@@ -7,10 +7,11 @@ DataStore rename that orphans every profile.
 """
 import json
 import math
+import os
 
 import pytest
 
-from conftest import BASE, GAMEDATA, ORIGINAL, PLACE, read
+from conftest import BASE, GAMEDATA, ORIGINAL, PLACE, SRC, read
 
 # The kinds the server actually handles. Adding one here without a handler in
 # Shop.lua / Progression.lua / Gifts.lua is a bug, and vice versa.
@@ -527,3 +528,49 @@ def test_notifier_kinds_match_the_palette(gd):
     assert kinds["good"] == ui["actionColor"], "good toasts and action buttons disagree"
     assert kinds["bad"] == [255, 60, 60], kinds["bad"]
     assert kinds["info"] == ui["accent"], "info toasts should use the game purple"
+
+
+# --- eating feedback --------------------------------------------------------
+# EatFx turns the server's FoodEaten into a chain counter, a camera punch and a
+# pitched blip. The numbers live here, so a rebalance that quietly makes the top
+# tier feel weaker than the one under it is a data bug, not a code bug.
+
+def test_rarity_feedback_escalates(gd):
+    """Punch and pitch must rise with the tier, and the cheapest tier must not
+    shake the camera at all - it is eaten every couple of seconds."""
+    rows = [(r["name"], r["personality"]) for r in gd["rarities"]]
+    assert rows[0][1]["punch"] == 0, "%s punches on every single cube" % rows[0][0]
+    assert rows[-1][1]["punch"] > 0, "the rarest cube has to kick"
+    for (prev, p_per), (cur, c_per) in zip(rows, rows[1:]):
+        assert c_per["punch"] >= p_per["punch"], "%s punches less than %s" % (cur, prev)
+        assert c_per["pitch"] >= p_per["pitch"], "%s sounds smaller than %s" % (cur, prev)
+
+
+def test_chain_pitch_stays_a_blip(gd):
+    """A Sound past PlaybackSpeed 3 stops being a blip. The longest chain the
+    escalation allows has to stay inside that, for every tier."""
+    steps = gd["settings"]["ComboMaxSteps"]
+    step = gd["settings"]["ComboPitchStep"]
+    for r in gd["rarities"]:
+        pitch = r["personality"]["pitch"]
+        assert 0.5 <= pitch <= 3, "%s pitch %r is not playable" % (r["name"], pitch)
+        assert pitch + steps * step <= 3, "%s hits PlaybackSpeed %.2f at a full chain" % (
+            r["name"], pitch + steps * step)
+
+
+def test_combo_settings_are_sane(gd):
+    settings = gd["settings"]
+    assert 0 < settings["ComboWindow"] <= 10, "a chain either never forms or never ends"
+    assert settings["ComboMaxSteps"] > 0, "the chain must escalate somewhere"
+    assert 0 < settings["ComboPunchStep"] < 1, "each chained cube should add a little kick"
+
+
+def test_food_eaten_is_wired_both_ends(gd):
+    """Declared, fired by the server, heard by the client. A declared event nobody
+    fires is dead weight; a fired event nobody hears means eating loses its
+    feedback and nothing else in the game complains."""
+    assert "FoodEaten" in gd["events"]
+    server = read(os.path.join(SRC, "ServerScriptService/Modules/Food.lua"))
+    client = read(os.path.join(SRC, "ReplicatedFirst/Client/ClientModules/EatFx.lua"))
+    assert 'Remotes.toClient(player, "FoodEaten"' in server
+    assert '"FoodEaten"' in client and "client.on" in client

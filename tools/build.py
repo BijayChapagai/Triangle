@@ -80,7 +80,7 @@ NEW_SERVER_SOURCES = [
 NEW_SHARED_SOURCES = ["GameConfig"]                 # -> ReplicatedStorage/Modules
 NEW_CLIENT_SOURCES = [                              # -> Client/ClientModules
     "LoadingScreen", "Notifier", "Hud", "DeathScreen", "Camera", "Chat", "CoreGui",
-    "KillFeed", "ZoneGuard", "FoodFx", "Tags",
+    "KillFeed", "ZoneGuard", "FoodFx", "Tags", "EatFx",
 ]
 NEW_MENU_SOURCES = [                                # -> Client/ClientModules/Menus
     "MenuUi", "Tabs", "Rebirth", "Skins", "Quests", "Zones", "Leaderboard",
@@ -300,6 +300,8 @@ def main():
         extra_guis += content.killfeed(b, gd)
     if "ZoneWarn" not in have_guis:
         extra_guis += content.zonewarn(b, gd)
+    if "Combo" not in have_guis:
+        extra_guis += content.combo(b, gd)
     if extra_guis:
         chunks["StarterGui"] = extra_guis
     if "Zones" not in set(items[c]["name"] for c in items[ref_of("Workspace")]["children"]):

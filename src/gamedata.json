@@ -22,6 +22,10 @@
     "CameraPunchTime": 0.35,
     "CashPerCubeBase": 1,
     "CashPerCubePerRebirth": 1,
+    "ComboMaxSteps": 20,
+    "ComboPitchStep": 0.015,
+    "ComboPunchStep": 0.05,
+    "ComboWindow": 2.5,
     "DataStoreName": "Yeah",
     "FloorY": 0,
     "FoodFxBudget": 24,
@@ -145,7 +149,9 @@
         "spin": 45,
         "tilt": 0,
         "bob": 0.0,
-        "pulse": 0.0
+        "pulse": 0.0,
+        "punch": 0.0,
+        "pitch": 1.0
       }
     },
     {
@@ -165,7 +171,9 @@
         "spin": 80,
         "tilt": 15,
         "bob": 0.5,
-        "pulse": 0.0
+        "pulse": 0.0,
+        "punch": 0.15,
+        "pitch": 1.08
       }
     },
     {
@@ -185,7 +193,9 @@
         "spin": 125,
         "tilt": 30,
         "bob": 0.9,
-        "pulse": 0.05
+        "pulse": 0.05,
+        "punch": 0.35,
+        "pitch": 1.18
       }
     },
     {
@@ -209,7 +219,9 @@
         "glow": {
           "brightness": 1.4,
           "range": 16
-        }
+        },
+        "punch": 0.6,
+        "pitch": 1.32
       }
     },
     {
@@ -233,7 +245,9 @@
         "glow": {
           "brightness": 2.2,
           "range": 24
-        }
+        },
+        "punch": 1.0,
+        "pitch": 1.5
       }
     }
   ],
@@ -645,7 +659,8 @@
     "Notify",
     "KillFeed",
     "QuestClaimAll",
-    "SavePrefs"
+    "SavePrefs",
+    "FoodEaten"
   ],
   "menus": [
     {
@@ -883,7 +898,23 @@
       0.5,
       0.44
     ],
-    "tabRowHeight": 92
+    "tabRowHeight": 92,
+    "combo": {
+      "y": 0.24,
+      "width": 320,
+      "height": 78,
+      "textSize": 46,
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "stroke": [
+        0,
+        0,
+        0
+      ]
+    }
   },
   "prefs": {
     "AutoFarmFlee": true,
